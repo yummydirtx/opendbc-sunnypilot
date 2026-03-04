@@ -13,16 +13,20 @@ Ecu = CarParams.Ecu
 # Steer torque limits
 
 class CarControllerParams:
-  STEER_MAX = 800                # theoretical max_steer 2047
-  STEER_DELTA_UP = 10             # torque increase per refresh
-  STEER_DELTA_DOWN = 25           # torque decrease per refresh
   STEER_DRIVER_ALLOWANCE = 15     # allowed driver torque before start limiting
   STEER_DRIVER_MULTIPLIER = 1     # weight driver torque
   STEER_DRIVER_FACTOR = 1         # from dbc
   STEER_STEP = 1  # 100 Hz
 
   def __init__(self, CP):
-    pass
+    if CP.carFingerprint == CAR.MAZDA_CX5_2022:
+      self.STEER_MAX = 1500        # theoretical max_steer 2047
+      self.STEER_DELTA_UP = 18     # proportional to STEER_MAX
+      self.STEER_DELTA_DOWN = 47
+    else:
+      self.STEER_MAX = 800         # theoretical max_steer 2047
+      self.STEER_DELTA_UP = 10
+      self.STEER_DELTA_DOWN = 25
 
 
 @dataclass

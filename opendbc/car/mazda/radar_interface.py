@@ -11,10 +11,12 @@ from opendbc.car.mazda.values import DBC
 # Empty slots are identified by sentinel values in all three fields.
 # 0x361-0x364: stationary + moving objects — RELV_OBJ reliable
 # 0x365-0x366: likely moving-vehicle-only slots — RELV_OBJ uses a different
-#              encoding (not yet decoded), so vRel is set to NaN.
+#              encoding (not yet decoded).  These are excluded because without
+#              a valid vRel, radard's Kalman filter and lead-matching cannot
+#              track them, and NaN velocity would poison downstream consumers.
 RADAR_TRACK_ADDRS = list(range(0x361, 0x367))
+RADAR_USABLE_ADDRS = set(range(0x361, 0x365))  # only tracks with reliable RELV
 RADAR_TRIGGER_MSG = RADAR_TRACK_ADDRS[-1]  # 0x366 — last in the burst
-RADAR_RELV_UNRELIABLE = {0x365, 0x366}     # peripheral tracks with bad RELV
 SENTINEL_DIST = 4095 * 0.0625   # 255.9375 m — raw 4095
 SENTINEL_ANG = 2046 * 0.015625  # 31.96875 deg — raw 2046
 SENTINEL_RELV = -16 * 0.0625    # -1.0 m/s — raw -16
@@ -59,8 +61,11 @@ class RadarInterface(RadarInterfaceBase):
       ang = msg['ANG_OBJ']
       relv = msg['RELV_OBJ']
 
-      # Empty slots have all three fields set to sentinel values
-      if dist == SENTINEL_DIST or ang == SENTINEL_ANG or relv == SENTINEL_RELV:
+      # Empty slots have all three fields set to sentinel values.
+      # Also skip tracks whose RELV encoding is not yet decoded — without
+      # a valid vRel the downstream Kalman filter and MPC solver break.
+      if dist == SENTINEL_DIST or ang == SENTINEL_ANG or relv == SENTINEL_RELV \
+         or addr not in RADAR_USABLE_ADDRS:
         if addr in self.pts:
           del self.pts[addr]
         continue
@@ -73,7 +78,7 @@ class RadarInterface(RadarInterfaceBase):
       azimuth = math.radians(ang)
       self.pts[addr].dRel = math.cos(azimuth) * dist
       self.pts[addr].yRel = -math.sin(azimuth) * dist
-      self.pts[addr].vRel = float('nan') if addr in RADAR_RELV_UNRELIABLE else relv
+      self.pts[addr].vRel = relv
       self.pts[addr].aRel = float('nan')
       self.pts[addr].yvRel = float('nan')
       self.pts[addr].measured = True

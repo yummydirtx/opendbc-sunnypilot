@@ -40,6 +40,12 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 # No steering wheel
 "COMMA_BODY" = [nan, 1000, nan]
 
+# Mazda CX-5 2022 (STEER_MAX=1500): drive-data baselines
+# latAccelFactor: from kinematic fit at full torque (~2.0 m/s² measured, + friction)
+# friction: old learned 0.170 at STEER_MAX=800 → 0.170×800/1500 = 0.091 (same physical force)
+# MAX_LAT_ACCEL: measured ~2.0 m/s² at ±1500 CAN (EPS non-linear above 800)
+"MAZDA_CX5_2022" = [2.1, 2.0, 0.091]
+
 # Totally new cars
 "RAM_1500_5TH_GEN" = [2.0, 2.0, 0.05]
 "RAM_HD_5TH_GEN" = [1.4, 1.4, 0.05]
@@ -96,6 +102,7 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 "LEXUS_LS" = [1.35, 1.7, 0.17]
 "TOYOTA_RAV4_PRIME" = [1.7, 2.0, 0.14]
 "TOYOTA_RAV4_TSS2_2022" = [1.9, 1.9304407208090029, 0.112174]
+"KIA_K7_2017" = [2.2, 2.2, 0.1]
 
 # Dashcam or fallback configured as ideal car
 "MOCK" = [10.0, 10, 0.0]
