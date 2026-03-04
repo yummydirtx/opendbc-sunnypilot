@@ -44,7 +44,7 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 # latAccelFactor: from kinematic fit at full torque (~2.0 m/s² measured, + friction)
 # friction: old learned 0.170 at STEER_MAX=800 → 0.170×800/1500 = 0.091 (same physical force)
 # MAX_LAT_ACCEL: measured ~2.0 m/s² at ±1500 CAN (EPS non-linear above 800)
-"MAZDA_CX5_2022" = [2.1, 2.0, 0.091]
+"MAZDA_CX5_2022" = [2.0, 2.0, 0.091]
 
 # Totally new cars
 "RAM_1500_5TH_GEN" = [2.0, 2.0, 0.05]
