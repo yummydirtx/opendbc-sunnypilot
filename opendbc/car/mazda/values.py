@@ -20,9 +20,9 @@ class CarControllerParams:
 
   def __init__(self, CP):
     if CP.carFingerprint == CAR.MAZDA_CX5_2022:
-      self.STEER_MAX = 1500        # theoretical max_steer 2047
-      self.STEER_DELTA_UP = 18     # proportional to STEER_MAX
-      self.STEER_DELTA_DOWN = 47
+      self.STEER_MAX = 1200        # theoretical max_steer 2047
+      self.STEER_DELTA_UP = 17     # snappier than proportional (15); up_jerk=2.69 < 3.0
+      self.STEER_DELTA_DOWN = 42   # quick release; down_jerk=3.8 < 5.0
     else:
       self.STEER_MAX = 800         # theoretical max_steer 2047
       self.STEER_DELTA_UP = 10
