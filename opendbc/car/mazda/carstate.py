@@ -2,7 +2,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.mazda.values import DBC, LKAS_LIMITS
+from opendbc.car.mazda.values import DBC, LKAS_LIMITS, MazdaFlags
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -23,6 +23,7 @@ class CarState(CarStateBase):
     self.distance_button = 0
     self.accel_button = 0
     self.decel_button = 0
+    self.debug_long_set_speed_kph = 0.0
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
@@ -93,12 +94,27 @@ class CarState(CarStateBase):
       else:
         self.lkas_init_frames += 1
 
-    # TODO: the signal used for available seems to be the adaptive cruise signal, instead of the main on
-    #       it should be used for carState.cruiseState.nonAdaptive instead
-    ret.cruiseState.available = cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
-    ret.cruiseState.enabled = cp.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
+    crz_speed_kph = cp.vl["CRZ_EVENTS"]["CRZ_SPEED"]
+    stock_crz_available = cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
+    stock_crz_active = cp.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
+
+    if self.CP.flags & MazdaFlags.DEBUG_LONG:
+      if crz_speed_kph > 0.1:
+        self.debug_long_set_speed_kph = crz_speed_kph
+      elif ret.brakePressed or cp.vl["ENGINE_DATA"]["PEDAL_GAS"] > 0:
+        self.debug_long_set_speed_kph = 0.0
+
+      ret.cruiseState.available = stock_crz_available or self.debug_long_set_speed_kph > 0.1
+      ret.cruiseState.enabled = stock_crz_active or self.debug_long_set_speed_kph > 0.1
+      ret.cruiseState.speed = max(crz_speed_kph, self.debug_long_set_speed_kph) * CV.KPH_TO_MS
+    else:
+      # TODO: the signal used for available seems to be the adaptive cruise signal, instead of the main on
+      #       it should be used for carState.cruiseState.nonAdaptive instead
+      ret.cruiseState.available = stock_crz_available
+      ret.cruiseState.enabled = stock_crz_active
+      ret.cruiseState.speed = crz_speed_kph * CV.KPH_TO_MS
+
     ret.cruiseState.standstill = cp.vl["PEDALS"]["STANDSTILL"] == 1
-    ret.cruiseState.speed = cp.vl["CRZ_EVENTS"]["CRZ_SPEED"] * CV.KPH_TO_MS
 
     # stock lkas should be on
     # TODO: is this needed?

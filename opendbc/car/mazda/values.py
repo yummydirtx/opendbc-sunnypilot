@@ -49,6 +49,11 @@ class MazdaFlags(IntFlag):
   # Static flags
   # Gen 1 hardware: same CAN messages and same camera
   GEN1 = 1
+  DEBUG_LONG = 1 << 8
+
+
+class MazdaSafetyFlags(IntFlag):
+  LONG_CONTROL = 1
 
 
 @dataclass
@@ -96,6 +101,9 @@ class Buttons:
   SET_MINUS = 2
   RESUME = 3
   CANCEL = 4
+
+
+MAZDA_RADAR_SESSION_ADDR = 0x764
 
 
 FW_QUERY_CONFIG = FwQueryConfig(
