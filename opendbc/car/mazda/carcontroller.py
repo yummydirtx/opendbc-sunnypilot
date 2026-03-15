@@ -42,7 +42,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     )
 
   def _append_debug_long_can(self, can_sends, CC):
-    if not self.debug_long_enabled:
+    if not self.debug_long_enabled or self.debug_long_mutator is None:
       return
 
     if self.frame % 50 == 0:
