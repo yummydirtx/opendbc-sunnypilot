@@ -86,7 +86,13 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
       }
     }
 
-    if ((msg->addr == MAZDA_CRZ_INFO) || (msg->addr == MAZDA_CRZ_CTRL) || (msg->addr == MAZDA_CRZ_EVENTS) || (msg->addr == MAZDA_RADAR_DIAG)) {
+    if (msg->addr == MAZDA_RADAR_DIAG) {
+      if (!mazda_longitudinal) {
+        tx = false;
+      }
+    }
+
+    if ((msg->addr == MAZDA_CRZ_INFO) || (msg->addr == MAZDA_CRZ_CTRL) || (msg->addr == MAZDA_CRZ_EVENTS)) {
       if (!mazda_longitudinal || !acc_main_on) {
         tx = false;
       }
