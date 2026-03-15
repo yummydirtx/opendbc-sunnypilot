@@ -30,6 +30,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.debug_long_enabled = bool(CP.flags & MazdaFlags.DEBUG_LONG.value)
     self.debug_long_mutator = MazdaLongitudinalReplayMutator(make_default_debug_long_stream()) if self.debug_long_enabled else None
     self.debug_long_pending = None
+    self.debug_long_session_started = False
+    self.debug_long_session_frame = -1
+
+  def _make_radar_session_request(self) -> CanData:
+    return CanData(MAZDA_RADAR_SESSION_ADDR, b"\x02\x10\x02\x00\x00\x00\x00\x00", 0)
 
   def _get_debug_long_command_set(self, CC):
     if self.debug_long_mutator is None:
@@ -45,8 +50,17 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if not self.debug_long_enabled or self.debug_long_mutator is None:
       return
 
+    if not self.debug_long_session_started:
+      can_sends.append(self._make_radar_session_request())
+      self.debug_long_session_started = True
+      self.debug_long_session_frame = self.frame
+      return
+
     if self.frame % 50 == 0:
       can_sends.append(make_tester_present_msg(MAZDA_RADAR_SESSION_ADDR, 0, suppress_response=True))
+
+    if self.frame - self.debug_long_session_frame < 4:
+      return
 
     if self.frame % 2 == 0:
       self.debug_long_pending = self._get_debug_long_command_set(CC)
