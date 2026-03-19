@@ -28,10 +28,10 @@ TESTER_PRESENT_STEP = 50
 # still leave stock 0x21f alive, so pushing 0x21b deep into the stock maxima can
 # unlatch the set speed. Keep the command window conservative until 0x21f is
 # owned as well.
-ACCEL_CMD_SCALE_UP = 250.0
-ACCEL_CMD_SCALE_DOWN = 250.0
-ACCEL_CMD_MAX = 200.0
-ACCEL_CMD_MIN = -200.0
+ACCEL_CMD_SCALE_UP = 350.0
+ACCEL_CMD_SCALE_DOWN = 300.0
+ACCEL_CMD_MAX = 1200.0
+ACCEL_CMD_MIN = -1200.0
 
 
 class MazdaLongitudinalProfile(str, Enum):

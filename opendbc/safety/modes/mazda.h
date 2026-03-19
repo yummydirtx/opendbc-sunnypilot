@@ -103,9 +103,13 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     }
 
     if (mazda_longitudinal && (msg->addr == MAZDA_CRZ_INFO)) {
+      // Keep Panda's Mazda-long safety window aligned with the software clip in
+      // opendbc/car/mazda/longitudinal.py. If this is tighter than the sender,
+      // Panda will silently drop 0x21b frames once ACCEL_CMD crosses the
+      // safety threshold, which looks like an unexplained set-speed unlatch.
       const LongitudinalLimits MAZDA_LONG_LIMITS = {
-        .max_accel = 200,
-        .min_accel = -350,
+        .max_accel = 1200,
+        .min_accel = -1200,
         .inactive_accel = 0,
       };
 
