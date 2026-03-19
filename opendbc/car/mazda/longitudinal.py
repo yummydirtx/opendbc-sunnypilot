@@ -23,6 +23,14 @@ CRZ_INFO_TEMPLATE = bytes.fromhex("01ffe20006800000")
 LONG_COMMAND_STEP = 2
 TESTER_PRESENT_STEP = 50
 
+# Stock Mazda logs show CRZ_INFO.ACCEL_CMD reaching roughly -1100..+1600 while
+# producing about -1.8..+2.0 m/s^2 at the vehicle. The initial alpha mapping of
+# 100 counts per m/s^2 was therefore far too small and made OP long feel lazy.
+ACCEL_CMD_SCALE_UP = 700.0
+ACCEL_CMD_SCALE_DOWN = 600.0
+ACCEL_CMD_MAX = 1600.0
+ACCEL_CMD_MIN = -1200.0
+
 
 class MazdaLongitudinalProfile(str, Enum):
   STANDBY = "standby"
@@ -69,7 +77,8 @@ def clip(value: float, lower: float, upper: float) -> float:
 
 
 def accel_to_accel_cmd(accel: float) -> int:
-  return int(round(clip(accel * 100.0, -350.0, 200.0)))
+  scale = ACCEL_CMD_SCALE_UP if accel >= 0.0 else ACCEL_CMD_SCALE_DOWN
+  return int(round(clip(accel * scale, ACCEL_CMD_MIN, ACCEL_CMD_MAX)))
 
 
 def build_crz_info(accel: float, counter: int) -> bytes:
