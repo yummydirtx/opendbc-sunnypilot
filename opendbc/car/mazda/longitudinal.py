@@ -23,15 +23,10 @@ CRZ_INFO_TEMPLATE = bytes.fromhex("01ffe20006800000")
 LONG_COMMAND_STEP = 2
 TESTER_PRESENT_STEP = 50
 
-# Stock Mazda logs show much larger CRZ_INFO ranges, but those stock ranges are
-# accompanied by coherent CRZ_EVENTS companion messages. In the current alpha we
-# still leave stock 0x21f alive, so pushing 0x21b deep into the stock maxima can
-# unlatch the set speed. Keep the command window conservative until 0x21f is
-# owned as well.
-ACCEL_CMD_SCALE_UP = 350.0
-ACCEL_CMD_SCALE_DOWN = 300.0
-ACCEL_CMD_MAX = 1200.0
-ACCEL_CMD_MIN = -1200.0
+ACCEL_CMD_SCALE_UP = 800.0
+ACCEL_CMD_SCALE_DOWN = 800.0
+ACCEL_CMD_MAX = 2000.0
+ACCEL_CMD_MIN = -2000.0
 
 
 class MazdaLongitudinalProfile(str, Enum):

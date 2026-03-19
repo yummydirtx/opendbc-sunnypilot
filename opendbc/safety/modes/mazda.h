@@ -108,8 +108,8 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
       // Panda will silently drop 0x21b frames once ACCEL_CMD crosses the
       // safety threshold, which looks like an unexplained set-speed unlatch.
       const LongitudinalLimits MAZDA_LONG_LIMITS = {
-        .max_accel = 1200,
-        .min_accel = -1200,
+        .max_accel = 2000,
+        .min_accel = -2000,
         .inactive_accel = 0,
       };
 
