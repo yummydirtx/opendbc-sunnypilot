@@ -23,13 +23,15 @@ CRZ_INFO_TEMPLATE = bytes.fromhex("01ffe20006800000")
 LONG_COMMAND_STEP = 2
 TESTER_PRESENT_STEP = 50
 
-# Stock Mazda logs show CRZ_INFO.ACCEL_CMD reaching roughly -1100..+1600 while
-# producing about -1.8..+2.0 m/s^2 at the vehicle. The initial alpha mapping of
-# 100 counts per m/s^2 was therefore far too small and made OP long feel lazy.
-ACCEL_CMD_SCALE_UP = 700.0
-ACCEL_CMD_SCALE_DOWN = 600.0
-ACCEL_CMD_MAX = 1600.0
-ACCEL_CMD_MIN = -1200.0
+# Stock Mazda logs show much larger CRZ_INFO ranges, but those stock ranges are
+# accompanied by coherent CRZ_EVENTS companion messages. In the current alpha we
+# still leave stock 0x21f alive, so pushing 0x21b deep into the stock maxima can
+# unlatch the set speed. Keep the command window conservative until 0x21f is
+# owned as well.
+ACCEL_CMD_SCALE_UP = 250.0
+ACCEL_CMD_SCALE_DOWN = 250.0
+ACCEL_CMD_MAX = 200.0
+ACCEL_CMD_MIN = -200.0
 
 
 class MazdaLongitudinalProfile(str, Enum):

@@ -60,7 +60,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         can_sends.append(create_radar_tester_present(RADAR_BUS))
 
       if self.frame % LONG_COMMAND_STEP == 0:
-        long_active = CC.longActive
+        # Mazda alpha-long still uses the surviving stock set-speed signal from
+        # CRZ_EVENTS. If that set speed drops to zero, fall back to standby so
+        # the driver can re-latch a new target instead of leaving 0x21c active.
+        stock_set_speed_latched = CS.out.cruiseState.speed > 0.1
+        long_active = CC.longActive and stock_set_speed_latched
         stopping = CC.actuators.longControlState == LongCtrlState.stopping
         accel = CC.actuators.accel if long_active else 0.0
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
