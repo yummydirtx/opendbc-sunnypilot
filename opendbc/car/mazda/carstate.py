@@ -101,10 +101,19 @@ class CarState(CarStateBase):
       else:
         self.lkas_init_frames += 1
 
-    # TODO: the signal used for available seems to be the adaptive cruise signal, instead of the main on
-    #       it should be used for carState.cruiseState.nonAdaptive instead
-    ret.cruiseState.available = True if self.CP.openpilotLongitudinalControl else cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
-    ret.cruiseState.enabled = cp.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
+    # In alpha-long mode the radar-owned CRZ_CTRL frame is intentionally suppressed.
+    # Keep Mazda in non-PCM button-enable mode and avoid subscribing to a message
+    # that will never be received, otherwise the CAN parser flags the platform
+    # invalid and selfdrived surfaces "Unknown Vehicle Variant".
+    if self.CP.openpilotLongitudinalControl:
+      ret.cruiseState.available = True
+      ret.cruiseState.enabled = False
+    else:
+      # TODO: the signal used for available seems to be the adaptive cruise signal,
+      # instead of the main on. It should be used for
+      # carState.cruiseState.nonAdaptive instead.
+      ret.cruiseState.available = cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
+      ret.cruiseState.enabled = cp.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
     ret.cruiseState.standstill = cp.vl["PEDALS"]["STANDSTILL"] == 1
     ret.cruiseState.speed = cp.vl["CRZ_EVENTS"]["CRZ_SPEED"] * CV.KPH_TO_MS
 
