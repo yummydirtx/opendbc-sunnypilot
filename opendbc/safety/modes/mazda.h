@@ -5,8 +5,10 @@
 // CAN msgs we care about
 #define MAZDA_LKAS          0x243U
 #define MAZDA_LKAS_HUD      0x440U
+#define MAZDA_CRZ_INFO      0x21bU
 #define MAZDA_CRZ_CTRL      0x21cU
 #define MAZDA_CRZ_BTNS      0x09dU
+#define MAZDA_RADAR_UDS     0x764U
 #define MAZDA_STEER_TORQUE  0x240U
 #define MAZDA_ENGINE_DATA   0x202U
 #define MAZDA_PEDALS        0x165U
@@ -14,6 +16,14 @@
 // CAN bus numbers
 #define MAZDA_MAIN 0
 #define MAZDA_CAM  2
+
+enum {
+  MAZDA_PARAM_LONGITUDINAL = 1,
+};
+
+static bool mazda_longitudinal = false;
+static bool mazda_resume_prev = false;
+static bool mazda_set_minus_prev = false;
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
@@ -30,11 +40,33 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
       update_sample(&torque_driver, torque_driver_new);
     }
 
-    // enter controls on rising edge of ACC, exit controls on ACC off
     if (msg->addr == MAZDA_CRZ_CTRL) {
-      bool cruise_engaged = msg->data[0] & 0x8U;
-      pcm_cruise_check(cruise_engaged);
-      acc_main_on = GET_BIT(msg, 17U);
+      if (!mazda_longitudinal) {
+        // enter controls on rising edge of ACC, exit controls on ACC off
+        bool cruise_engaged = msg->data[0] & 0x8U;
+        pcm_cruise_check(cruise_engaged);
+        acc_main_on = GET_BIT(msg, 17U);
+      }
+    }
+
+    if (msg->addr == MAZDA_CRZ_BTNS && mazda_longitudinal) {
+      bool cancel = GET_BIT(msg, 0U);
+      bool resume = GET_BIT(msg, 2U);
+      bool set_minus = GET_BIT(msg, 5U);
+
+      if (resume && !mazda_resume_prev) {
+        controls_allowed = true;
+      }
+      if (!set_minus && mazda_set_minus_prev) {
+        controls_allowed = true;
+      }
+      if (cancel) {
+        controls_allowed = false;
+      }
+
+      mazda_resume_prev = resume;
+      mazda_set_minus_prev = set_minus;
+      acc_main_on = true;
     }
 
     if (msg->addr == MAZDA_ENGINE_DATA) {
@@ -70,6 +102,35 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
       }
     }
 
+    if (mazda_longitudinal && (msg->addr == MAZDA_CRZ_INFO)) {
+      const LongitudinalLimits MAZDA_LONG_LIMITS = {
+        .max_accel = 200,
+        .min_accel = -350,
+        .inactive_accel = 0,
+      };
+
+      int desired_accel = ((((int)msg->data[2] & 0x3U) << 11) | (((int)msg->data[3]) << 3) | (((int)msg->data[4]) >> 5)) - 4096;
+      if (longitudinal_accel_checks(desired_accel, MAZDA_LONG_LIMITS)) {
+        tx = false;
+      }
+    }
+
+    if (mazda_longitudinal && (msg->addr == MAZDA_CRZ_CTRL)) {
+      bool cruise_active = GET_BIT(msg, 3U);
+      if (!controls_allowed && cruise_active) {
+        tx = false;
+      }
+    }
+
+    if (mazda_longitudinal && (msg->addr == MAZDA_RADAR_UDS)) {
+      bool tester_present = (msg->data[0] == 0x02U) && (msg->data[1] == 0x3EU) && (msg->data[2] == 0x80U);
+      bool session_control = (msg->data[0] == 0x02U) && (msg->data[1] == 0x10U) &&
+                             ((msg->data[2] == 0x01U) || (msg->data[2] == 0x02U));
+      if (!tester_present && !session_control) {
+        tx = false;
+      }
+    }
+
     // cruise buttons check
     if (msg->addr == MAZDA_CRZ_BTNS) {
       // allow resume spamming while controls allowed, but
@@ -85,7 +146,19 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config mazda_init(uint16_t param) {
-  static const CanMsg MAZDA_TX_MSGS[] = {{MAZDA_LKAS, 0, 8, .check_relay = true}, {MAZDA_CRZ_BTNS, 0, 8, .check_relay = false}, {MAZDA_LKAS_HUD, 0, 8, .check_relay = true}};
+  static const CanMsg MAZDA_TX_MSGS[] = {
+    {MAZDA_LKAS, 0, 8, .check_relay = true},
+    {MAZDA_CRZ_BTNS, 0, 8, .check_relay = false},
+    {MAZDA_LKAS_HUD, 0, 8, .check_relay = true},
+  };
+  static const CanMsg MAZDA_LONG_TX_MSGS[] = {
+    {MAZDA_LKAS, 0, 8, .check_relay = true},
+    {MAZDA_CRZ_BTNS, 0, 8, .check_relay = false},
+    {MAZDA_LKAS_HUD, 0, 8, .check_relay = true},
+    {MAZDA_CRZ_INFO, 0, 8, .check_relay = false},
+    {MAZDA_CRZ_CTRL, 0, 8, .check_relay = false},
+    {MAZDA_RADAR_UDS, 0, 8, .check_relay = false},
+  };
 
   static RxCheck mazda_rx_checks[] = {
     {.msg = {{MAZDA_CRZ_CTRL,     0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
@@ -94,9 +167,20 @@ static safety_config mazda_init(uint16_t param) {
     {.msg = {{MAZDA_ENGINE_DATA,  0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
     {.msg = {{MAZDA_PEDALS,       0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
+  static RxCheck mazda_long_rx_checks[] = {
+    {.msg = {{MAZDA_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_STEER_TORQUE, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_ENGINE_DATA,  0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_PEDALS,       0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
 
-  SAFETY_UNUSED(param);
-  return BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
+  mazda_longitudinal = GET_FLAG(param, MAZDA_PARAM_LONGITUDINAL);
+  mazda_resume_prev = false;
+  mazda_set_minus_prev = false;
+  acc_main_on = mazda_longitudinal;
+
+  return mazda_longitudinal ? BUILD_SAFETY_CFG(mazda_long_rx_checks, MAZDA_LONG_TX_MSGS) :
+                              BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
 }
 
 const safety_hooks mazda_hooks = {

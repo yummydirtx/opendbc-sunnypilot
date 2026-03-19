@@ -2,12 +2,14 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
 from opendbc.sunnypilot.car.mazda.icbm import IntelligentCruiseButtonManagementInterface
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
+LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 
 class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterface):
@@ -18,6 +20,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.apply_torque_last = 0
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.brake_counter = 0
+    self.long_counter = 0
 
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
@@ -30,24 +33,40 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, self.params)
 
-    if CC.cruiseControl.cancel:
-      # If brake is pressed, let us wait >70ms before trying to disable crz to avoid
-      # a race condition with the stock system, where the second cancel from openpilot
-      # will disable the crz 'main on'. crz ctrl msg runs at 50hz. 70ms allows us to
-      # read 3 messages and most likely sync state before we attempt cancel.
-      self.brake_counter = self.brake_counter + 1
-      if self.frame % 10 == 0 and not (CS.out.brakePressed and self.brake_counter < 7):
-        # Cancel Stock ACC if it's enabled while OP is disengaged
-        # Send at a rate of 10hz until we sync with stock ACC state
-        can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.CANCEL))
+    if not self.CP.openpilotLongitudinalControl:
+      if CC.cruiseControl.cancel:
+        # If brake is pressed, let us wait >70ms before trying to disable crz to avoid
+        # a race condition with the stock system, where the second cancel from openpilot
+        # will disable the crz 'main on'. crz ctrl msg runs at 50hz. 70ms allows us to
+        # read 3 messages and most likely sync state before we attempt cancel.
+        self.brake_counter = self.brake_counter + 1
+        if self.frame % 10 == 0 and not (CS.out.brakePressed and self.brake_counter < 7):
+          # Cancel Stock ACC if it's enabled while OP is disengaged
+          # Send at a rate of 10hz until we sync with stock ACC state
+          can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.CANCEL))
+      else:
+        self.brake_counter = 0
+        if CC.cruiseControl.resume and self.frame % 5 == 0:
+          # Mazda Stop and Go requires a RES button (or gas) press if the car stops more than 3 seconds
+          # Send Resume button when planner wants car to move
+          can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.RESUME))
     else:
       self.brake_counter = 0
-      if CC.cruiseControl.resume and self.frame % 5 == 0:
-        # Mazda Stop and Go requires a RES button (or gas) press if the car stops more than 3 seconds
-        # Send Resume button when planner wants car to move
-        can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.RESUME))
 
     self.apply_torque_last = apply_torque
+
+    if self.CP.openpilotLongitudinalControl:
+      if self.frame % TESTER_PRESENT_STEP == 0:
+        can_sends.append(create_radar_tester_present(RADAR_BUS))
+
+      if self.frame % LONG_COMMAND_STEP == 0:
+        long_active = CC.longActive
+        stopping = CC.actuators.longControlState == LongCtrlState.stopping
+        accel = CC.actuators.accel if long_active else 0.0
+        can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
+                                                      long_active, CC.hudControl.leadVisible,
+                                                      CS.out.standstill or stopping))
+        self.long_counter = (self.long_counter + 1) % 16
 
     # send HUD alerts
     if self.frame % 50 == 0:
