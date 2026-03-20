@@ -28,6 +28,8 @@ ACCEL_CMD_SCALE_DOWN = 1000.0
 ACCEL_CMD_MAX = 2000.0
 ACCEL_CMD_MIN = -2000.0
 HOLD_BRAKE_CMD_TARGET = -900.0
+NEAR_STOP_BRAKE_CMD_TARGET = -650.0
+NEAR_STOP_ENTRY_SPEED = 1.0
 
 
 class MazdaLongitudinalProfile(str, Enum):
@@ -83,6 +85,14 @@ def hold_brake_accel() -> float:
   # Stock HOLD keeps a real negative CRZ_INFO command alive at standstill.
   # Keep the raw target approximately constant as scales change.
   return HOLD_BRAKE_CMD_TARGET / ACCEL_CMD_SCALE_DOWN
+
+
+def near_stop_brake_accel(v_ego: float) -> float:
+  # Stock stop-to-hold ramps into the final HOLD brake command before true
+  # standstill, rather than waiting until the speed bit drops to zero.
+  ratio = clip(v_ego / NEAR_STOP_ENTRY_SPEED, 0.0, 1.0)
+  target = HOLD_BRAKE_CMD_TARGET + (NEAR_STOP_BRAKE_CMD_TARGET - HOLD_BRAKE_CMD_TARGET) * ratio
+  return target / ACCEL_CMD_SCALE_DOWN
 
 
 def build_crz_info(accel: float, counter: int) -> bytes:

@@ -2,7 +2,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present, hold_brake_accel
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, near_stop_brake_accel
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
@@ -66,18 +66,24 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         # CRZ_EVENTS. If that set speed drops to zero, fall back to standby so
         # the driver can re-latch a new target instead of leaving 0x21c active.
         stock_set_speed_latched = CS.out.cruiseState.speed > 0.1
-        long_active = CC.longActive and stock_set_speed_latched
         resume_pressed = any(be.pressed and be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.out.buttonEvents)
-        if not long_active:
-          self.hold_latched = False
-        elif CS.out.standstill and not CS.out.gasPressed and not resume_pressed:
-          self.hold_latched = True
-        elif self.hold_latched and (CS.out.gasPressed or resume_pressed):
-          self.hold_latched = False
+        stopping_request = CC.actuators.longControlState == LongCtrlState.stopping
 
+        if self.hold_latched and (CS.out.gasPressed or resume_pressed or not CC.longActive):
+          self.hold_latched = False
+        elif CC.longActive and CS.out.standstill and not CS.out.gasPressed and not resume_pressed:
+          self.hold_latched = True
+
+        long_active = CC.longActive and (stock_set_speed_latched or self.hold_latched)
         hold_active = long_active and self.hold_latched
-        stopping = CC.actuators.longControlState == LongCtrlState.stopping or hold_active
-        accel = hold_brake_accel() if hold_active else (CC.actuators.accel if long_active else 0.0)
+        near_stop_hold = long_active and not hold_active and stopping_request and CS.out.vEgo < 1.0 and not CS.out.gasPressed and not resume_pressed
+        stopping = stopping_request or hold_active or near_stop_hold
+        if hold_active:
+          accel = hold_brake_accel()
+        elif near_stop_hold:
+          accel = min(CC.actuators.accel, near_stop_brake_accel(CS.out.vEgo))
+        else:
+          accel = CC.actuators.accel if long_active else 0.0
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, CC.hudControl.leadVisible,
                                                       CS.out.standstill or stopping))
