@@ -23,10 +23,11 @@ CRZ_INFO_TEMPLATE = bytes.fromhex("01ffe20006800000")
 LONG_COMMAND_STEP = 2
 TESTER_PRESENT_STEP = 50
 
-ACCEL_CMD_SCALE_UP = 800.0
-ACCEL_CMD_SCALE_DOWN = 800.0
+ACCEL_CMD_SCALE_UP = 1000.0
+ACCEL_CMD_SCALE_DOWN = 1000.0
 ACCEL_CMD_MAX = 2000.0
 ACCEL_CMD_MIN = -2000.0
+HOLD_BRAKE_CMD_TARGET = -900.0
 
 
 class MazdaLongitudinalProfile(str, Enum):
@@ -40,7 +41,7 @@ CRZ_CTRL_TEMPLATES: dict[MazdaLongitudinalProfile, bytes] = {
   MazdaLongitudinalProfile.STANDBY: bytes.fromhex("02010b0000000000"),
   MazdaLongitudinalProfile.ENGAGED_CRUISE: bytes.fromhex("0a018b2000001000"),
   MazdaLongitudinalProfile.ENGAGED_FOLLOW: bytes.fromhex("0a018b4000001000"),
-  MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018b6000001000"),
+  MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018f6000001000"),
 }
 
 
@@ -76,6 +77,12 @@ def clip(value: float, lower: float, upper: float) -> float:
 def accel_to_accel_cmd(accel: float) -> int:
   scale = ACCEL_CMD_SCALE_UP if accel >= 0.0 else ACCEL_CMD_SCALE_DOWN
   return int(round(clip(accel * scale, ACCEL_CMD_MIN, ACCEL_CMD_MAX)))
+
+
+def hold_brake_accel() -> float:
+  # Stock HOLD keeps a real negative CRZ_INFO command alive at standstill.
+  # Keep the raw target approximately constant as scales change.
+  return HOLD_BRAKE_CMD_TARGET / ACCEL_CMD_SCALE_DOWN
 
 
 def build_crz_info(accel: float, counter: int) -> bytes:

@@ -2,7 +2,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present, hold_brake_accel
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
@@ -10,6 +10,7 @@ from opendbc.sunnypilot.car.mazda.icbm import IntelligentCruiseButtonManagementI
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
+ButtonType = structs.CarState.ButtonEvent.Type
 
 
 class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterface):
@@ -21,6 +22,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.brake_counter = 0
     self.long_counter = 0
+    self.hold_latched = False
 
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
@@ -65,8 +67,17 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         # the driver can re-latch a new target instead of leaving 0x21c active.
         stock_set_speed_latched = CS.out.cruiseState.speed > 0.1
         long_active = CC.longActive and stock_set_speed_latched
-        stopping = CC.actuators.longControlState == LongCtrlState.stopping
-        accel = CC.actuators.accel if long_active else 0.0
+        resume_pressed = any(be.pressed and be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.out.buttonEvents)
+        if not long_active:
+          self.hold_latched = False
+        elif CS.out.standstill and not CS.out.gasPressed and not resume_pressed:
+          self.hold_latched = True
+        elif self.hold_latched and (CS.out.gasPressed or resume_pressed):
+          self.hold_latched = False
+
+        hold_active = long_active and self.hold_latched
+        stopping = CC.actuators.longControlState == LongCtrlState.stopping or hold_active
+        accel = hold_brake_accel() if hold_active else (CC.actuators.accel if long_active else 0.0)
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, CC.hudControl.leadVisible,
                                                       CS.out.standstill or stopping))
