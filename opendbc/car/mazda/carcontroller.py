@@ -2,7 +2,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, near_stop_brake_accel
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, hold_latched_accel, near_stop_brake_accel
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
@@ -79,14 +79,15 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         near_stop_hold = long_active and not hold_active and stopping_request and CS.out.vEgo < 1.0 and not CS.out.gasPressed and not resume_pressed
         stopping = stopping_request or hold_active or near_stop_hold
         if hold_active:
-          accel = hold_brake_accel()
+          accel = hold_latched_accel()
         elif near_stop_hold:
           accel = min(CC.actuators.accel, near_stop_brake_accel(CS.out.vEgo))
         else:
           accel = CC.actuators.accel if long_active else 0.0
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, CC.hudControl.leadVisible,
-                                                      CS.out.standstill or stopping))
+                                                      CS.out.standstill or stopping, hold_active,
+                                                      CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
 
     # send HUD alerts

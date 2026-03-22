@@ -23,13 +23,20 @@ CRZ_INFO_TEMPLATE = bytes.fromhex("01ffe20006800000")
 LONG_COMMAND_STEP = 2
 TESTER_PRESENT_STEP = 50
 
-ACCEL_CMD_SCALE_UP = 1000.0
-ACCEL_CMD_SCALE_DOWN = 1000.0
 ACCEL_CMD_MAX = 2000.0
 ACCEL_CMD_MIN = -2000.0
 HOLD_BRAKE_CMD_TARGET = -900.0
-NEAR_STOP_BRAKE_CMD_TARGET = -650.0
+HOLD_LATCHED_CMD_TARGET = -1.0
+NEAR_STOP_BRAKE_CMD_TARGET = -750.0
 NEAR_STOP_ENTRY_SPEED = 1.0
+
+# Stock Mazda longitudinal is not using one global raw-command scale across all
+# speeds. Keep more authority at low/mid speed, and soften the map at highway
+# speed where the single-scale version feels jerky.
+ACCEL_SCALE_UP_BP = (0.0, 4.2, 11.1, 22.2)
+ACCEL_SCALE_UP_V = (1000.0, 1000.0, 950.0, 800.0)
+ACCEL_SCALE_DOWN_BP = (0.0, 1.4, 5.6, 22.2)
+ACCEL_SCALE_DOWN_V = (1000.0, 1000.0, 950.0, 800.0)
 
 
 class MazdaLongitudinalProfile(str, Enum):
@@ -45,6 +52,8 @@ CRZ_CTRL_TEMPLATES: dict[MazdaLongitudinalProfile, bytes] = {
   MazdaLongitudinalProfile.ENGAGED_FOLLOW: bytes.fromhex("0a018b4000001000"),
   MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018f6000001000"),
 }
+
+CRZ_CTRL_HOLD_LATCHED = bytes.fromhex("0a018f6000000000")
 
 
 def _get_signal(message_name: str, signal_name: str):
@@ -76,15 +85,38 @@ def clip(value: float, lower: float, upper: float) -> float:
   return min(max(value, lower), upper)
 
 
-def accel_to_accel_cmd(accel: float) -> int:
-  scale = ACCEL_CMD_SCALE_UP if accel >= 0.0 else ACCEL_CMD_SCALE_DOWN
+def _interp_scale(v_ego: float, bp: tuple[float, ...], values: tuple[float, ...]) -> float:
+  if v_ego <= bp[0]:
+    return values[0]
+  if v_ego >= bp[-1]:
+    return values[-1]
+
+  for i in range(1, len(bp)):
+    if v_ego <= bp[i]:
+      x0, x1 = bp[i - 1], bp[i]
+      y0, y1 = values[i - 1], values[i]
+      ratio = (v_ego - x0) / (x1 - x0)
+      return y0 + (y1 - y0) * ratio
+
+  return values[-1]
+
+
+def accel_to_accel_cmd(accel: float, v_ego: float) -> int:
+  scale = _interp_scale(v_ego, ACCEL_SCALE_UP_BP, ACCEL_SCALE_UP_V) if accel >= 0.0 else _interp_scale(v_ego, ACCEL_SCALE_DOWN_BP, ACCEL_SCALE_DOWN_V)
   return int(round(clip(accel * scale, ACCEL_CMD_MIN, ACCEL_CMD_MAX)))
 
 
 def hold_brake_accel() -> float:
   # Stock HOLD keeps a real negative CRZ_INFO command alive at standstill.
   # Keep the raw target approximately constant as scales change.
-  return HOLD_BRAKE_CMD_TARGET / ACCEL_CMD_SCALE_DOWN
+  return HOLD_BRAKE_CMD_TARGET / ACCEL_SCALE_DOWN_V[0]
+
+
+def hold_latched_accel() -> float:
+  # Once stock HOLD latches, CRZ_INFO.ACCEL_CMD relaxes back near zero while the
+  # downstream brake latch stays active. Keeping a large negative command here
+  # does not match the stock radar path.
+  return HOLD_LATCHED_CMD_TARGET / ACCEL_SCALE_DOWN_V[0]
 
 
 def near_stop_brake_accel(v_ego: float) -> float:
@@ -92,11 +124,11 @@ def near_stop_brake_accel(v_ego: float) -> float:
   # standstill, rather than waiting until the speed bit drops to zero.
   ratio = clip(v_ego / NEAR_STOP_ENTRY_SPEED, 0.0, 1.0)
   target = HOLD_BRAKE_CMD_TARGET + (NEAR_STOP_BRAKE_CMD_TARGET - HOLD_BRAKE_CMD_TARGET) * ratio
-  return target / ACCEL_CMD_SCALE_DOWN
+  return target / ACCEL_SCALE_DOWN_V[0]
 
 
-def build_crz_info(accel: float, counter: int) -> bytes:
-  raw = _patch_signal("CRZ_INFO", CRZ_INFO_TEMPLATE, "ACCEL_CMD", accel_to_accel_cmd(accel))
+def build_crz_info(accel: float, counter: int, v_ego: float) -> bytes:
+  raw = _patch_signal("CRZ_INFO", CRZ_INFO_TEMPLATE, "ACCEL_CMD", accel_to_accel_cmd(accel, v_ego))
   raw = _patch_signal("CRZ_INFO", raw, "CTR1", counter % 16)
   return _update_crz_info_checksum(raw)
 
@@ -111,15 +143,18 @@ def select_profile(long_active: bool, lead_visible: bool, standstill: bool) -> M
   return MazdaLongitudinalProfile.ENGAGED_CRUISE
 
 
-def build_crz_ctrl(long_active: bool, lead_visible: bool, standstill: bool) -> bytes:
+def build_crz_ctrl(long_active: bool, lead_visible: bool, standstill: bool, hold_latched: bool) -> bytes:
+  if hold_latched:
+    return CRZ_CTRL_HOLD_LATCHED
   return CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, standstill)]
 
 
 def create_longitudinal_messages(bus: int, accel: float, counter: int, long_active: bool,
-                                 lead_visible: bool, standstill: bool) -> list[CanData]:
+                                 lead_visible: bool, standstill: bool, hold_latched: bool = False,
+                                 v_ego: float = 0.0) -> list[CanData]:
   return [
-    CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter), bus),
-    CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, standstill), bus),
+    CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, v_ego), bus),
+    CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, standstill, hold_latched), bus),
   ]
 
 
