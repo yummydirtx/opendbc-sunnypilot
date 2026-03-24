@@ -7,7 +7,6 @@ from opendbc.car.mazda.carstate import CarState
 from opendbc.car.mazda.longitudinal import enter_radar_programming_session
 from opendbc.car.mazda.radar_interface import RadarInterface
 from opendbc.car.mazda.values import CAR, DBC, LKAS_LIMITS
-from opendbc.sunnypilot.car.mazda.interface_ext import CarInterfaceExt
 
 MAZDA_LONG_SAFETY_PARAM = 1
 
@@ -16,34 +15,6 @@ class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
   RadarInterface = RadarInterface
-
-  def __init__(self, CP, CP_SP):
-    super().__init__(CP, CP_SP)
-    self._ext = CarInterfaceExt(CP, self)
-
-  @property
-  def v_ego(self):
-    return self._ext.v_ego
-
-  @v_ego.setter
-  def v_ego(self, value):
-    self._ext.v_ego = value
-
-  def torque_from_lateral_accel(self):
-    if self._ext.speed_dep:
-      return self._ext.torque_from_lateral_accel_speed_dep_closure
-    return self.torque_from_lateral_accel_linear
-
-  def lateral_accel_from_torque(self):
-    if self._ext.speed_dep:
-      return self._ext.lateral_accel_from_torque_speed_dep_closure
-    return self.lateral_accel_from_torque_linear
-
-  def torque_from_lateral_accel_in_torque_space(self):
-    return self._ext.torque_from_lateral_accel_in_torque_space()
-
-  def update_speed_dep_laf(self, speed_bp, laf_bp, friction_bp, valid_bp):
-    self._ext.update_speed_dep_laf(speed_bp, laf_bp, friction_bp, valid_bp)
 
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
