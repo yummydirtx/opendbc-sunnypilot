@@ -31,6 +31,8 @@ class CarInterface(CarInterfaceBase):
     ret.enableBsm = 0x477 in fingerprint[0]
 
     ret.steerActuatorDelay = 0.1
+    if candidate in (CAR.MAZDA_CX5_2022,):
+      ret.steerActuatorDelay = 0.07
     ret.steerLimitTimer = 0.8
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)

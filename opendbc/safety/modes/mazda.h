@@ -85,7 +85,7 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     .max_rate_up = 15,
     .max_rate_down = 38,
     .max_rt_delta = 450,
-    .driver_torque_multiplier = 1,
+    .driver_torque_multiplier = 15,
     .driver_torque_allowance = 15,
     .type = TorqueDriverLimited,
   };

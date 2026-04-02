@@ -1,6 +1,4 @@
 VERSION ""
-
-
 NS_ :
     NS_DESC_
     CM_
@@ -34,8 +32,6 @@ NS_ :
 BS_:
 
 BU_: XXX
-
-
 BO_ 117 STEER_RELATED: 8 XXX
  SG_ CTR : 7|8@0+ (1,0) [0|255] "" XXX
  SG_ NEW_SIGNAL_1 : 48|1@0+ (1,0) [0|1] "" XXX
@@ -325,7 +321,6 @@ BO_ 1034 MSG_07: 8 XXX
  SG_ NEW_SIGNAL_7 : 47|8@0+ (1,0) [0|255] "" XXX
  SG_ NEW_SIGNAL_8 : 39|8@0+ (1,0) [0|255] "" XXX
  SG_ NEW_SIGNAL_9 : 31|8@0+ (1,0) [0|255] "" XXX
-
 BO_ 130 STEER: 8 XXX
  SG_ NEW_SIGNAL_5 : 55|8@0+ (1,0) [0|255] "" XXX
  SG_ NEW_SIGNAL_6 : 63|8@0+ (1,0) [0|255] "" XXX
@@ -342,7 +337,6 @@ BO_ 120 BRAKE: 8 XXX
 BO_ 304 GEAR_RELATED: 8 XXX
  SG_ NEW_SIGNAL_1 : 55|8@0+ (1,0) [0|255] "" XXX
  SG_ NEW_SIGNAL_2 : 47|8@0+ (1,0) [0|255] "" XXX
-
 BO_ 836 NEW_MSG_19: 8 XXX
  SG_ CTR : 48|4@1+ (1,0) [0|15] "" XXX
  SG_ CTR2 : 63|8@0+ (1,0) [0|255] "" XXX
@@ -354,7 +348,6 @@ BO_ 832 SEATBELT: 8 XXX
  SG_ CTR2 : 23|4@0+ (1,0) [0|255] "" XXX
  SG_ NEW_SIGNAL_4 : 8|4@1+ (1,0) [0|3] "" XXX
  SG_ DRIVER_SEATBELT : 27|1@0+ (1,0) [0|1] "" XXX
-
 BO_ 158 MSG_05: 8 XXX
  SG_ NEW_SIGNAL_1 : 23|8@0+ (1,0) [0|15] "" XXX
  SG_ NEW_SIGNAL_2 : 47|8@0+ (1,0) [0|255] "" XXX
@@ -725,10 +718,6 @@ BO_ 64 MOB2: 8 XXX
 BO_ 1171 MOB3: 8 XXX
 
 BO_ 1248 MOB4: 8 XXX
-
-
-
-
 
 CM_ SG_ 357 GEAR "13P, 26R, 13N, 24D";
 CM_ SG_ 605 PED_BRAKE "3: no brake, 4: brake";
