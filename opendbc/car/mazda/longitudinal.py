@@ -50,10 +50,8 @@ CRZ_CTRL_TEMPLATES: dict[MazdaLongitudinalProfile, bytes] = {
   MazdaLongitudinalProfile.STANDBY: bytes.fromhex("02010b0000000000"),
   MazdaLongitudinalProfile.ENGAGED_CRUISE: bytes.fromhex("0a018b2000001000"),
   MazdaLongitudinalProfile.ENGAGED_FOLLOW: bytes.fromhex("0a018b4000001000"),
-  MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018f6000001000"),
+  MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018b6000001000"),
 }
-
-CRZ_CTRL_HOLD_LATCHED = bytes.fromhex("0a018f6000000000")
 
 
 def _get_signal(message_name: str, signal_name: str):
@@ -144,8 +142,6 @@ def select_profile(long_active: bool, lead_visible: bool, standstill: bool) -> M
 
 
 def build_crz_ctrl(long_active: bool, lead_visible: bool, standstill: bool, hold_latched: bool) -> bytes:
-  if hold_latched:
-    return CRZ_CTRL_HOLD_LATCHED
   return CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, standstill)]
 
 

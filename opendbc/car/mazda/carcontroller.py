@@ -2,15 +2,13 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, hold_latched_accel, near_stop_brake_accel
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
 from opendbc.sunnypilot.car.mazda.icbm import IntelligentCruiseButtonManagementInterface
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
-LongCtrlState = structs.CarControl.Actuators.LongControlState
-ButtonType = structs.CarState.ButtonEvent.Type
 
 
 class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterface):
@@ -22,7 +20,6 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.brake_counter = 0
     self.long_counter = 0
-    self.hold_latched = False
 
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
@@ -62,32 +59,13 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         can_sends.append(create_radar_tester_present(RADAR_BUS))
 
       if self.frame % LONG_COMMAND_STEP == 0:
-        # Mazda alpha-long still uses the surviving stock set-speed signal from
-        # CRZ_EVENTS. If that set speed drops to zero, fall back to standby so
-        # the driver can re-latch a new target instead of leaving 0x21c active.
-        stock_set_speed_latched = CS.out.cruiseState.speed > 0.1
-        resume_pressed = any(be.pressed and be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.out.buttonEvents)
-        stopping_request = CC.actuators.longControlState == LongCtrlState.stopping
-
-        if self.hold_latched and (CS.out.gasPressed or resume_pressed or not CC.longActive):
-          self.hold_latched = False
-        elif CC.longActive and CS.out.standstill and not CS.out.gasPressed and not resume_pressed:
-          self.hold_latched = True
-
-        long_active = CC.longActive and (stock_set_speed_latched or self.hold_latched)
-        hold_active = long_active and self.hold_latched
-        near_stop_hold = long_active and not hold_active and stopping_request and CS.out.vEgo < 1.0 and not CS.out.gasPressed and not resume_pressed
-        stopping = stopping_request or hold_active or near_stop_hold
-        if hold_active:
-          accel = hold_latched_accel()
-        elif near_stop_hold:
-          accel = min(CC.actuators.accel, near_stop_brake_accel(CS.out.vEgo))
-        else:
-          accel = CC.actuators.accel if long_active else 0.0
+        # Match Zeph's simpler Mazda stop/go behavior: while longitudinal is
+        # active, switch directly to the stop/go CRZ_CTRL profile at standstill
+        # without extra hold-latch or near-stop state handling.
+        long_active = CC.longActive
+        accel = CC.actuators.accel if long_active else 0.0
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
-                                                      long_active, CC.hudControl.leadVisible,
-                                                      CS.out.standstill or stopping, hold_active,
-                                                      CS.out.vEgo))
+                                                      long_active, False, CS.out.standstill))
         self.long_counter = (self.long_counter + 1) % 16
 
     # send HUD alerts
