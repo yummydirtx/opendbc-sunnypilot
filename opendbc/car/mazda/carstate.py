@@ -124,10 +124,11 @@ class CarState(CarStateBase):
       *create_button_events(self.main_button, prev_main_button, {1: ButtonType.mainCruise}),
     ]
 
-    # In alpha-long mode ACC activity still survives on PEDALS, but
-    # availability remains sourced from CRZ_CTRL.
+    # In alpha-long mode the radar-owned CRZ_CTRL frame is intentionally
+    # suppressed, so do not subscribe to it here or card will mark CAN invalid
+    # once the stock frame times out after takeover.
     if self.CP.openpilotLongitudinalControl:
-      ret.cruiseState.available = cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
+      ret.cruiseState.available = True
       ret.cruiseState.enabled = cp.vl["PEDALS"]["ACC_ACTIVE"] == 1
     else:
       # TODO: the signal used for available seems to be the adaptive cruise signal,
