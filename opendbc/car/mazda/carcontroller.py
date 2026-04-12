@@ -1,14 +1,20 @@
 from opendbc.can import CANPacker
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, RADAR_BUS, TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_tester_present
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, TESTER_PRESENT_STEP, \
+                                           create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, \
+                                           hold_latched_accel, near_stop_brake_accel
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
 from opendbc.sunnypilot.car.mazda.icbm import IntelligentCruiseButtonManagementInterface
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
+LongCtrlState = structs.CarControl.Actuators.LongControlState
+
+HOLD_REQUEST_FRAMES = int(round(6.0 / DT_CTRL))
+RESUME_RELEASE_FRAMES = int(round(0.5 / DT_CTRL))
 
 
 class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterface):
@@ -20,6 +26,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.brake_counter = 0
     self.long_counter = 0
+    self.standstill_hold_frames = 0
+    self.resume_release_frames = 0
 
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
@@ -51,21 +59,52 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
           can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.RESUME))
     else:
       self.brake_counter = 0
+      if CS.out.standstill and CC.cruiseControl.resume and self.frame % 5 == 0:
+        can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.RESUME))
 
     self.apply_torque_last = apply_torque
 
     if self.CP.openpilotLongitudinalControl:
+      stopping = CC.actuators.longControlState == LongCtrlState.stopping
+      starting = CC.actuators.longControlState == LongCtrlState.starting
+      resume_requested = CC.cruiseControl.resume or CC.cruiseControl.override or CS.out.gasPressed or starting
+
+      if not CC.longActive:
+        self.standstill_hold_frames = 0
+        self.resume_release_frames = 0
+      else:
+        if CS.out.standstill and not resume_requested:
+          self.standstill_hold_frames += 1
+        else:
+          self.standstill_hold_frames = 0
+
+        if CS.out.standstill and resume_requested:
+          self.resume_release_frames = RESUME_RELEASE_FRAMES
+        elif self.resume_release_frames > 0:
+          self.resume_release_frames -= 1
+
+      hold_request = CC.longActive and CS.out.standstill and not resume_requested
+      hold_latched = hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
+      release_brake = self.resume_release_frames > 0
+
+      accel = 0.0
+      if CC.longActive:
+        accel = CC.actuators.accel
+        if release_brake:
+          accel = max(accel, 0.0)
+        elif CS.out.standstill:
+          accel = hold_latched_accel() if hold_latched else hold_brake_accel()
+        elif stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED:
+          accel = min(accel, near_stop_brake_accel(CS.out.vEgo))
+
       if self.frame % TESTER_PRESENT_STEP == 0:
         can_sends.append(create_radar_tester_present(RADAR_BUS))
 
       if self.frame % LONG_COMMAND_STEP == 0:
-        # Match Zeph's simpler Mazda stop/go behavior: while longitudinal is
-        # active, switch directly to the stop/go CRZ_CTRL profile at standstill
-        # without extra hold-latch or near-stop state handling.
         long_active = CC.longActive
-        accel = CC.actuators.accel if long_active else 0.0
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
-                                                      long_active, False, CS.out.standstill))
+                                                      long_active, False, CS.out.standstill,
+                                                      hold_request, hold_latched, CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
 
     # send HUD alerts

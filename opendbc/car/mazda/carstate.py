@@ -124,12 +124,11 @@ class CarState(CarStateBase):
       *create_button_events(self.main_button, prev_main_button, {1: ButtonType.mainCruise}),
     ]
 
-    # In alpha-long mode the radar-owned CRZ_CTRL frame is intentionally suppressed.
-    # Keep Mazda in non-PCM button-enable mode and source MAIN/CANCEL from the
-    # surviving CRZ_BTNS message instead of the missing availability bit.
+    # In alpha-long mode the radar-owned CRZ_CTRL frame is intentionally
+    # suppressed, but the ACC state still survives on PEDALS.
     if self.CP.openpilotLongitudinalControl:
-      ret.cruiseState.available = True
-      ret.cruiseState.enabled = False
+      ret.cruiseState.available = cp.vl["PEDALS"]["CRZ_AVAILABLE"] == 1
+      ret.cruiseState.enabled = cp.vl["PEDALS"]["ACC_ACTIVE"] == 1
     else:
       # TODO: the signal used for available seems to be the adaptive cruise signal,
       # instead of the main on. It should be used for
