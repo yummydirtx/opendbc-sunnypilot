@@ -125,22 +125,23 @@ def near_stop_brake_accel(v_ego: float) -> float:
   return target / ACCEL_SCALE_DOWN_V[0]
 
 
-def build_crz_info(accel: float, counter: int, long_active: bool, hold_request: bool, v_ego: float,
+def build_crz_info(accel: float, counter: int, long_active: bool, hold_request: bool, hold_latched: bool, v_ego: float,
                    acc_set_allowed: bool = True) -> bytes:
+  stop_request = hold_request and not hold_latched
   raw = _patch_signal("CRZ_INFO", CRZ_INFO_TEMPLATE, "ACCEL_CMD", accel_to_accel_cmd(accel, v_ego))
   raw = _patch_signal("CRZ_INFO", raw, "ACC_ACTIVE", int(long_active))
   raw = _patch_signal("CRZ_INFO", raw, "ACC_SET_ALLOWED", int(acc_set_allowed))
   raw = _patch_signal("CRZ_INFO", raw, "CRZ_ENDED", 0)
-  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE", int(hold_request))
-  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE2", int(hold_request))
+  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE", int(stop_request))
+  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE2", int(stop_request))
   raw = _patch_signal("CRZ_INFO", raw, "CTR1", counter % 16)
   return _update_crz_info_checksum(raw)
 
 
-def select_profile(long_active: bool, lead_visible: bool, hold_request: bool) -> MazdaLongitudinalProfile:
+def select_profile(long_active: bool, lead_visible: bool, stop_request: bool) -> MazdaLongitudinalProfile:
   if not long_active:
     return MazdaLongitudinalProfile.STANDBY
-  if hold_request:
+  if stop_request:
     return MazdaLongitudinalProfile.STOP_GO_HOLD
   if lead_visible:
     return MazdaLongitudinalProfile.ENGAGED_FOLLOW
@@ -148,9 +149,10 @@ def select_profile(long_active: bool, lead_visible: bool, hold_request: bool) ->
 
 
 def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, hold_latched: bool) -> bytes:
-  raw = CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, hold_request)]
+  stop_request = hold_request and not hold_latched
+  raw = CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, stop_request)]
   raw = _patch_signal("CRZ_CTRL", raw, "CRZ_ACTIVE", int(long_active))
-  raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", int(long_active))
+  raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", int(long_active and not hold_latched))
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_1", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_2", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "RADAR_HAS_LEAD", int(lead_visible))
@@ -162,7 +164,7 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
                                  hold_latched: bool = False,
                                  v_ego: float = 0.0) -> list[CanData]:
   return [
-    CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, v_ego), bus),
+    CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, hold_latched, v_ego), bus),
     CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, hold_request, hold_latched), bus),
   ]
 
