@@ -25,10 +25,11 @@ TESTER_PRESENT_STEP = 50
 
 ACCEL_CMD_MAX = 2000.0
 ACCEL_CMD_MIN = -2000.0
-HOLD_BRAKE_CMD_TARGET = -900.0
+HOLD_BRAKE_CMD_TARGET = -1024.0
 HOLD_LATCHED_CMD_TARGET = -1.0
 NEAR_STOP_BRAKE_CMD_TARGET = -750.0
 NEAR_STOP_ENTRY_SPEED = 1.0
+ACTIVE_STOP_CHECKSUM_BIAS = 0x04
 
 # Stock Mazda longitudinal is not using one global raw-command scale across all
 # speeds. Keep more authority at low/mid speed, and soften the map at highway
@@ -75,9 +76,9 @@ def _compute_inverted_sum_checksum(raw: bytes, checksum_index: int = 7) -> int:
   return (0xFF - (sum(raw[i] for i in range(len(raw)) if i != checksum_index) & 0xFF)) & 0xFF
 
 
-def _update_crz_info_checksum(raw: bytes) -> bytes:
+def _update_crz_info_checksum(raw: bytes, bias: int = 0) -> bytes:
   dat = bytearray(raw)
-  dat[7] = _compute_inverted_sum_checksum(dat)
+  dat[7] = (_compute_inverted_sum_checksum(dat) + bias) & 0xFF
   return bytes(dat)
 
 
@@ -107,15 +108,15 @@ def accel_to_accel_cmd(accel: float, v_ego: float) -> int:
 
 
 def hold_brake_accel() -> float:
-  # Stock HOLD keeps a real negative CRZ_INFO command alive at standstill.
+  # Stock HOLD keeps a strong negative CRZ_INFO command alive through the
+  # active stop/hold phase until the chassis hold latch takes over.
   # Keep the raw target approximately constant as scales change.
   return HOLD_BRAKE_CMD_TARGET / ACCEL_SCALE_DOWN_V[0]
 
 
 def hold_latched_accel() -> float:
-  # Once stock HOLD latches, CRZ_INFO.ACCEL_CMD relaxes back near zero while the
-  # downstream brake latch stays active. Keeping a large negative command here
-  # does not match the stock radar path.
+  # Once the chassis hold latch takes over, stock CRZ_INFO.ACCEL_CMD relaxes
+  # back near zero and the stop bits clear.
   return HOLD_LATCHED_CMD_TARGET / ACCEL_SCALE_DOWN_V[0]
 
 
@@ -128,15 +129,17 @@ def near_stop_brake_accel(v_ego: float) -> float:
 
 
 def build_crz_info(accel: float, counter: int, long_active: bool, hold_request: bool, v_ego: float,
-                   acc_set_allowed: bool = True) -> bytes:
+                   hold_latched: bool = False, acc_set_allowed: bool = True) -> bytes:
+  stopping_active = hold_request and not hold_latched
   raw = _patch_signal("CRZ_INFO", CRZ_INFO_TEMPLATE, "ACCEL_CMD", accel_to_accel_cmd(accel, v_ego))
   raw = _patch_signal("CRZ_INFO", raw, "ACC_ACTIVE", int(long_active))
   raw = _patch_signal("CRZ_INFO", raw, "ACC_SET_ALLOWED", int(acc_set_allowed))
   raw = _patch_signal("CRZ_INFO", raw, "CRZ_ENDED", 0)
-  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE", int(hold_request))
-  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE2", int(hold_request))
+  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE", int(stopping_active))
+  raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE2", int(stopping_active))
   raw = _patch_signal("CRZ_INFO", raw, "CTR1", counter % 16)
-  return _update_crz_info_checksum(raw)
+  checksum_bias = ACTIVE_STOP_CHECKSUM_BIAS if stopping_active else 0
+  return _update_crz_info_checksum(raw, bias=checksum_bias)
 
 
 def select_profile(long_active: bool, lead_visible: bool, hold_request: bool,
@@ -172,7 +175,8 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
                                  crz_hold_passive: bool = False,
                                  v_ego: float = 0.0) -> list[CanData]:
   return [
-    CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, v_ego), bus),
+    CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, v_ego,
+                                          hold_latched=hold_latched), bus),
     CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, hold_request, hold_latched,
                                           crz_hold_latched=crz_hold_latched,
                                           crz_hold_passive=crz_hold_passive), bus),

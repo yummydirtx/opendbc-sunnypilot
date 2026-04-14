@@ -85,6 +85,10 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         elif self.resume_release_frames > 0:
           self.resume_release_frames -= 1
 
+      # Stock MRCC enters its stop-go state before the standstill bit flips.
+      # Mirror that near-stop transition on the synthesized CRZ frames while
+      # keeping the later latch timing anchored to true standstill.
+      stop_go_request = CC.longActive and not resume_requested and (CS.out.standstill or stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED)
       hold_request = CC.longActive and CS.out.standstill and not resume_requested
       crz_hold_latched = hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
       crz_hold_passive = hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES
@@ -109,7 +113,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         lead_visible = CC.hudControl.leadVisible
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, lead_visible, CS.out.standstill,
-                                                      hold_request=hold_request,
+                                                      hold_request=stop_go_request,
                                                       hold_latched=hold_latched,
                                                       crz_hold_latched=crz_hold_latched,
                                                       crz_hold_passive=crz_hold_passive,
