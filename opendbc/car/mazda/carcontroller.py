@@ -13,6 +13,8 @@ from opendbc.sunnypilot.car.mazda.icbm import IntelligentCruiseButtonManagementI
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
+CRZ_CTRL_LATCH_FRAMES = int(round(2.0 / DT_CTRL))
+CRZ_CTRL_PASSIVE_FRAMES = int(round(9.6 / DT_CTRL))
 HOLD_REQUEST_FRAMES = int(round(6.0 / DT_CTRL))
 RESUME_RELEASE_FRAMES = int(round(0.5 / DT_CTRL))
 
@@ -84,6 +86,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
           self.resume_release_frames -= 1
 
       hold_request = CC.longActive and CS.out.standstill and not resume_requested
+      crz_hold_latched = hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
+      crz_hold_passive = hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES
       hold_latched = hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
       release_brake = self.resume_release_frames > 0
 
@@ -105,7 +109,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         lead_visible = CC.hudControl.leadVisible
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, lead_visible, CS.out.standstill,
-                                                      hold_request, hold_latched, CS.out.vEgo))
+                                                      hold_request=hold_request,
+                                                      hold_latched=hold_latched,
+                                                      crz_hold_latched=crz_hold_latched,
+                                                      crz_hold_passive=crz_hold_passive,
+                                                      v_ego=CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
 
     # send HUD alerts

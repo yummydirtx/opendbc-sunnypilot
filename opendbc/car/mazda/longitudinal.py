@@ -44,6 +44,7 @@ class MazdaLongitudinalProfile(str, Enum):
   ENGAGED_CRUISE = "engaged_cruise"
   ENGAGED_FOLLOW = "engaged_follow"
   STOP_GO_HOLD = "stop_go_hold"
+  STOP_GO_HOLD_LATCHED = "stop_go_hold_latched"
 
 
 CRZ_CTRL_TEMPLATES: dict[MazdaLongitudinalProfile, bytes] = {
@@ -51,6 +52,7 @@ CRZ_CTRL_TEMPLATES: dict[MazdaLongitudinalProfile, bytes] = {
   MazdaLongitudinalProfile.ENGAGED_CRUISE: bytes.fromhex("0a018b2000001000"),
   MazdaLongitudinalProfile.ENGAGED_FOLLOW: bytes.fromhex("0a018b4000001000"),
   MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018b6000001000"),
+  MazdaLongitudinalProfile.STOP_GO_HOLD_LATCHED: bytes.fromhex("0a018b8000001000"),
 }
 
 
@@ -137,9 +139,12 @@ def build_crz_info(accel: float, counter: int, long_active: bool, hold_request: 
   return _update_crz_info_checksum(raw)
 
 
-def select_profile(long_active: bool, lead_visible: bool, hold_request: bool) -> MazdaLongitudinalProfile:
+def select_profile(long_active: bool, lead_visible: bool, hold_request: bool,
+                   crz_hold_latched: bool) -> MazdaLongitudinalProfile:
   if not long_active:
     return MazdaLongitudinalProfile.STANDBY
+  if hold_request and crz_hold_latched:
+    return MazdaLongitudinalProfile.STOP_GO_HOLD_LATCHED
   if hold_request:
     return MazdaLongitudinalProfile.STOP_GO_HOLD
   if lead_visible:
@@ -147,13 +152,14 @@ def select_profile(long_active: bool, lead_visible: bool, hold_request: bool) ->
   return MazdaLongitudinalProfile.ENGAGED_CRUISE
 
 
-def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, hold_latched: bool) -> bytes:
-  # Stock stop-and-go hold is a follow-state; keep HOLD in a stock-like
-  # lead-present combination even when openpilot stops without a real lead.
-  lead_visible = lead_visible or hold_request or hold_latched
-  raw = CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, hold_request)]
+def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, hold_latched: bool,
+                   crz_hold_latched: bool = False, crz_hold_passive: bool = False) -> bytes:
+  # Stock stop-and-go progresses through multiple CRZ_CTRL stop phases. Mirror
+  # that sequence so the synthetic path keeps the same latch states as stock.
+  lead_visible = lead_visible or hold_request or hold_latched or crz_hold_latched or crz_hold_passive
+  raw = CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, hold_request, crz_hold_latched)]
   raw = _patch_signal("CRZ_CTRL", raw, "CRZ_ACTIVE", int(long_active))
-  raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", int(long_active))
+  raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", int(long_active and not crz_hold_passive))
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_1", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_2", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "RADAR_HAS_LEAD", int(lead_visible))
@@ -161,12 +167,15 @@ def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, ho
 
 
 def create_longitudinal_messages(bus: int, accel: float, counter: int, long_active: bool,
-                                 lead_visible: bool, standstill: bool, hold_request: bool = False,
-                                 hold_latched: bool = False,
+                                 lead_visible: bool, standstill: bool, *, hold_request: bool = False,
+                                 hold_latched: bool = False, crz_hold_latched: bool = False,
+                                 crz_hold_passive: bool = False,
                                  v_ego: float = 0.0) -> list[CanData]:
   return [
     CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, v_ego), bus),
-    CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, hold_request, hold_latched), bus),
+    CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, hold_request, hold_latched,
+                                          crz_hold_latched=crz_hold_latched,
+                                          crz_hold_passive=crz_hold_passive), bus),
   ]
 
 
