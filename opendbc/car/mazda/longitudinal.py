@@ -148,6 +148,9 @@ def select_profile(long_active: bool, lead_visible: bool, hold_request: bool) ->
 
 
 def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, hold_latched: bool) -> bytes:
+  # Stock stop-and-go hold is a follow-state; keep HOLD in a stock-like
+  # lead-present combination even when openpilot stops without a real lead.
+  lead_visible = lead_visible or hold_request or hold_latched
   raw = CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, hold_request)]
   raw = _patch_signal("CRZ_CTRL", raw, "CRZ_ACTIVE", int(long_active))
   raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", int(long_active))

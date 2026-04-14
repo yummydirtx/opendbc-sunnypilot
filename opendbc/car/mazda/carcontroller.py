@@ -102,8 +102,9 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
 
       if self.frame % LONG_COMMAND_STEP == 0:
         long_active = CC.longActive
+        lead_visible = CC.hudControl.leadVisible
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
-                                                      long_active, False, CS.out.standstill,
+                                                      long_active, lead_visible, CS.out.standstill,
                                                       hold_request, hold_latched, CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
 
