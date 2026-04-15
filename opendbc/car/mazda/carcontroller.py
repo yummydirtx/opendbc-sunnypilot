@@ -69,7 +69,9 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if self.CP.openpilotLongitudinalControl:
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       starting = CC.actuators.longControlState == LongCtrlState.starting
+      resume_button_requested = CC.cruiseControl.resume
       release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or starting
+      brake_release_requested = resume_button_requested or release_hold_requested
 
       if not CC.longActive:
         self.standstill_hold_frames = 0
@@ -80,7 +82,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         else:
           self.standstill_hold_frames = 0
 
-        if CS.out.standstill and release_hold_requested:
+        if CS.out.standstill and brake_release_requested:
           self.resume_release_frames = RESUME_RELEASE_FRAMES
         elif self.resume_release_frames > 0:
           self.resume_release_frames -= 1
@@ -94,7 +96,9 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       stop_go_request = CC.longActive and not release_hold_requested and (CS.out.standstill or stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED)
       hold_request = CC.longActive and CS.out.standstill and not release_hold_requested
       crz_hold_latched = hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
-      crz_hold_passive = hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES
+      # Stock resumes from passive hold by re-enabling ACC while the RES press
+      # is active, instead of staying indefinitely in the passive-hold substate.
+      crz_hold_passive = hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
       hold_latched = hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
       release_brake = self.resume_release_frames > 0
 
