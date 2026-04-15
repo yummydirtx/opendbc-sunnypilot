@@ -2,9 +2,10 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, TESTER_PRESENT_STEP, \
-                                           create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, \
-                                           hold_latched_accel, near_stop_brake_accel, resume_unlatch_accel
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, RADAR_SIDECAR_STEP, \
+                                           TESTER_PRESENT_STEP, create_longitudinal_messages, create_radar_sidecar_messages, \
+                                           create_radar_tester_present, hold_brake_accel, hold_latched_accel, \
+                                           near_stop_brake_accel
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
@@ -27,8 +28,10 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.params = CarControllerParams(CP)
     self.apply_torque_last = 0
     self.packer = CANPacker(dbc_names[Bus.pt])
+    self.radar_sidecar_packer = CANPacker("mazda_radar_sidecar")
     self.brake_counter = 0
     self.long_counter = 0
+    self.radar_sidecar_counter = 0
     self.standstill_hold_frames = 0
     self.resume_release_frames = 0
     self.resume_crz_latched_frames = 0
@@ -128,7 +131,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       if CC.longActive:
         accel = CC.actuators.accel
         if release_brake:
-          accel = max(accel, resume_unlatch_accel() if CS.out.standstill else 0.0)
+          accel = max(accel, 0.0)
         elif CS.out.standstill:
           accel = hold_latched_accel() if hold_latched else hold_brake_accel()
         elif stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED:
@@ -136,6 +139,12 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
 
       if self.frame % TESTER_PRESENT_STEP == 0:
         can_sends.append(create_radar_tester_present(RADAR_BUS))
+
+      if self.frame % RADAR_SIDECAR_STEP == 0:
+        can_sends.extend(create_radar_sidecar_messages(self.radar_sidecar_packer, RADAR_BUS,
+                                                       self.radar_sidecar_counter, CS.out.vEgo,
+                                                       CS.out.steeringAngleDeg))
+        self.radar_sidecar_counter = (self.radar_sidecar_counter + 1) % 16
 
       if self.frame % LONG_COMMAND_STEP == 0:
         long_active = CC.longActive

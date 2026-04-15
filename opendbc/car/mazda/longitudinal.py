@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 
 from opendbc.can.dbc import DBC
-from opendbc.can.packer import set_value
+from opendbc.can.packer import CANPacker, set_value
 from opendbc.car import make_tester_present_msg, uds
 from opendbc.car.can_definitions import CanData
 from opendbc.car.carlog import carlog
@@ -22,15 +22,19 @@ CRZ_INFO_TEMPLATE = bytes.fromhex("01ffe20006800000")
 
 LONG_COMMAND_STEP = 2
 TESTER_PRESENT_STEP = 50
+RADAR_SIDECAR_STEP = 10
 
 ACCEL_CMD_MAX = 2000.0
 ACCEL_CMD_MIN = -2000.0
 HOLD_BRAKE_CMD_TARGET = -1024.0
 HOLD_LATCHED_CMD_TARGET = -1.0
 NEAR_STOP_BRAKE_CMD_TARGET = -750.0
-RESUME_UNLATCH_CMD_TARGET = 200.0
 NEAR_STOP_ENTRY_SPEED = 1.0
 ACTIVE_STOP_CHECKSUM_BIAS = 0x04
+RADAR_TRACK_COUNTER_MAX = 16
+RADAR_INVERSE_SPEED_SCALE = -4.4
+RADAR_STEER_SCALE = -17.4
+RADAR_STEER_OFFSET = 2048.0
 
 # Stock Mazda longitudinal is not using one global raw-command scale across all
 # speeds. Keep more authority at low/mid speed, and soften the map at highway
@@ -55,6 +59,15 @@ CRZ_CTRL_TEMPLATES: dict[MazdaLongitudinalProfile, bytes] = {
   MazdaLongitudinalProfile.ENGAGED_FOLLOW: bytes.fromhex("0a018b4000001000"),
   MazdaLongitudinalProfile.STOP_GO_HOLD: bytes.fromhex("0a018b6000001000"),
   MazdaLongitudinalProfile.STOP_GO_HOLD_LATCHED: bytes.fromhex("0a018b8000001000"),
+}
+
+RADAR_SIDECAR_STATIC_DATA: dict[int, tuple[int, int]] = {
+  361: (0xFFF7FEFE, 0x1FC),
+  362: (0xFFF7FEFE, 0x1FC),
+  363: (0xFFF7FEFE, 0x1FC0000),
+  364: (0xFFF7FEFE, 0x1FC0000),
+  365: (0xFFF7FE7F, 0xFBFF3FC),
+  366: (0xFFF7FE7F, 0xFBFF3FC),
 }
 
 
@@ -119,13 +132,6 @@ def hold_latched_accel() -> float:
   # Once the chassis hold latch takes over, stock CRZ_INFO.ACCEL_CMD relaxes
   # back near zero and the stop bits clear.
   return HOLD_LATCHED_CMD_TARGET / ACCEL_SCALE_DOWN_V[0]
-
-
-def resume_unlatch_accel() -> float:
-  # Stock passive-hold resumes do not stay at zero torque through the RES burst.
-  # Provide a small positive floor so the chassis actually drops HOLD before the
-  # planner's normal accel ramp takes over.
-  return RESUME_UNLATCH_CMD_TARGET / ACCEL_SCALE_UP_V[0]
 
 
 def near_stop_brake_accel(v_ego: float) -> float:
@@ -197,6 +203,35 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
 
 def create_radar_tester_present(bus: int = RADAR_BUS) -> CanData:
   return make_tester_present_msg(RADAR_ADDR, bus, suppress_response=True)
+
+
+def create_radar_sidecar_messages(packer: CANPacker, bus: int, counter: int, v_ego: float,
+                                  steering_angle_deg: float) -> list[CanData]:
+  steer_angle = clip(steering_angle_deg * RADAR_STEER_SCALE + RADAR_STEER_OFFSET, 0.0, 4092.0)
+  counter %= RADAR_TRACK_COUNTER_MAX
+  ret = []
+
+  for addr, (msgs_1, msgs_2) in RADAR_SIDECAR_STATIC_DATA.items():
+    values = {
+      "MSGS_1": msgs_1,
+      "MSGS_2": msgs_2,
+      "CTR": counter,
+    }
+
+    if addr == 361:
+      values.update({
+        "INVERSE_SPEED": int(round(v_ego * RADAR_INVERSE_SPEED_SCALE)),
+        "BIT": 1,
+      })
+    elif addr == 362:
+      values.update({
+        "CLIPPED_STEER_ANGLE": int(round(steer_angle)),
+      })
+
+    msg_addr, dat, src = packer.make_can_msg(f"RADAR_{addr}", bus, values)
+    ret.append(CanData(msg_addr, dat, src))
+
+  return ret
 
 
 def _uds_request(can_recv, can_send, bus: int, addr: int, request: bytes, response: bytes,
