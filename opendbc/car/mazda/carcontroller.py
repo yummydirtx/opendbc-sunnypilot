@@ -69,18 +69,18 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if self.CP.openpilotLongitudinalControl:
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       starting = CC.actuators.longControlState == LongCtrlState.starting
-      resume_requested = CC.cruiseControl.resume or CC.cruiseControl.override or CS.out.gasPressed or starting
+      release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or starting
 
       if not CC.longActive:
         self.standstill_hold_frames = 0
         self.resume_release_frames = 0
       else:
-        if CS.out.standstill and not resume_requested:
+        if CS.out.standstill and not release_hold_requested:
           self.standstill_hold_frames += 1
         else:
           self.standstill_hold_frames = 0
 
-        if CS.out.standstill and resume_requested:
+        if CS.out.standstill and release_hold_requested:
           self.resume_release_frames = RESUME_RELEASE_FRAMES
         elif self.resume_release_frames > 0:
           self.resume_release_frames -= 1
@@ -88,8 +88,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       # Stock MRCC enters its stop-go state before the standstill bit flips.
       # Mirror that near-stop transition on the synthesized CRZ frames while
       # keeping the later latch timing anchored to true standstill.
-      stop_go_request = CC.longActive and not resume_requested and (CS.out.standstill or stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED)
-      hold_request = CC.longActive and CS.out.standstill and not resume_requested
+      # A virtual RES press should happen while Mazda still sees the passive
+      # stop-go hold state. Only release that synthetic hold once the car is
+      # actually starting to move or the driver overrides with gas.
+      stop_go_request = CC.longActive and not release_hold_requested and (CS.out.standstill or stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED)
+      hold_request = CC.longActive and CS.out.standstill and not release_hold_requested
       crz_hold_latched = hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
       crz_hold_passive = hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES
       hold_latched = hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
