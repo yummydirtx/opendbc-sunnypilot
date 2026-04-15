@@ -28,6 +28,7 @@ ACCEL_CMD_MIN = -2000.0
 HOLD_BRAKE_CMD_TARGET = -1024.0
 HOLD_LATCHED_CMD_TARGET = -1.0
 NEAR_STOP_BRAKE_CMD_TARGET = -750.0
+RESUME_UNLATCH_CMD_TARGET = 200.0
 NEAR_STOP_ENTRY_SPEED = 1.0
 ACTIVE_STOP_CHECKSUM_BIAS = 0x04
 
@@ -118,6 +119,13 @@ def hold_latched_accel() -> float:
   # Once the chassis hold latch takes over, stock CRZ_INFO.ACCEL_CMD relaxes
   # back near zero and the stop bits clear.
   return HOLD_LATCHED_CMD_TARGET / ACCEL_SCALE_DOWN_V[0]
+
+
+def resume_unlatch_accel() -> float:
+  # Stock passive-hold resumes do not stay at zero torque through the RES burst.
+  # Provide a small positive floor so the chassis actually drops HOLD before the
+  # planner's normal accel ramp takes over.
+  return RESUME_UNLATCH_CMD_TARGET / ACCEL_SCALE_UP_V[0]
 
 
 def near_stop_brake_accel(v_ego: float) -> float:

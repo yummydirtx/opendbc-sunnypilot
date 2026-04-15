@@ -4,7 +4,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, TESTER_PRESENT_STEP, \
                                            create_longitudinal_messages, create_radar_tester_present, hold_brake_accel, \
-                                           hold_latched_accel, near_stop_brake_accel
+                                           hold_latched_accel, near_stop_brake_accel, resume_unlatch_accel
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.values import CarControllerParams, Buttons
 
@@ -113,19 +113,22 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       elif self.resume_release_frames > 0:
         self.resume_release_frames -= 1
 
-      crz_info_hold_request = stop_go_request and not brake_release_requested
       crz_hold_latched = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES and \
                          (not resume_button_requested or self.resume_crz_latched_frames > 0)
       # Stock resumes from passive hold by re-enabling ACC while the RES press
       # is active, instead of staying indefinitely in the passive-hold substate.
       crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
       release_brake = self.resume_release_frames > 0
+      # Keep CRZ_INFO stop bits cleared through the whole synthetic brake-release
+      # window. Otherwise Mazda sees positive accel while we still advertise an
+      # active stop, which shows up in the logs as a failed restart handoff.
+      crz_info_hold_request = stop_go_request and not (brake_release_requested or release_brake)
 
       accel = 0.0
       if CC.longActive:
         accel = CC.actuators.accel
         if release_brake:
-          accel = max(accel, 0.0)
+          accel = max(accel, resume_unlatch_accel() if CS.out.standstill else 0.0)
         elif CS.out.standstill:
           accel = hold_latched_accel() if hold_latched else hold_brake_accel()
         elif stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED:
