@@ -15,6 +15,7 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 CRZ_CTRL_LATCH_FRAMES = int(round(2.0 / DT_CTRL))
 CRZ_CTRL_PASSIVE_FRAMES = int(round(9.6 / DT_CTRL))
+CRZ_CTRL_RESUME_REACTIVATE_FRAMES = int(round(0.08 / DT_CTRL))
 HOLD_REQUEST_FRAMES = int(round(6.0 / DT_CTRL))
 RESUME_RELEASE_FRAMES = int(round(0.5 / DT_CTRL))
 
@@ -30,6 +31,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.long_counter = 0
     self.standstill_hold_frames = 0
     self.resume_release_frames = 0
+    self.resume_crz_latched_frames = 0
+    self.resume_button_prev = False
 
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
@@ -69,17 +72,30 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if self.CP.openpilotLongitudinalControl:
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       starting = CC.actuators.longControlState == LongCtrlState.starting
-      resume_button_requested = CC.cruiseControl.resume
+      # Physical wheel RES survives radar suppression on CRZ_BTNS, while the
+      # planner-driven virtual resume comes in through CC.cruiseControl.resume.
+      # Treat either source as the Mazda stop-go resume request so manual RES
+      # exits the synthetic hold path the same way stock does.
+      resume_button_requested = CC.cruiseControl.resume or bool(CS.accel_button)
+      resume_rising_edge = resume_button_requested and not self.resume_button_prev
       release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or starting
 
       if not CC.longActive:
         self.standstill_hold_frames = 0
         self.resume_release_frames = 0
+        self.resume_crz_latched_frames = 0
       else:
         if CS.out.standstill and not release_hold_requested:
           self.standstill_hold_frames += 1
         else:
           self.standstill_hold_frames = 0
+
+        if CS.out.standstill and not release_hold_requested and resume_rising_edge and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES:
+          # Stock briefly re-enables ACC in the latched-hold profile when RES is
+          # first pressed, then drops back into the active stop-go profile.
+          self.resume_crz_latched_frames = CRZ_CTRL_RESUME_REACTIVATE_FRAMES
+        elif self.resume_crz_latched_frames > 0:
+          self.resume_crz_latched_frames -= 1
 
       # Stock MRCC enters its stop-go state before the standstill bit flips.
       # Mirror that near-stop transition on the synthesized CRZ frames while
@@ -98,7 +114,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         self.resume_release_frames -= 1
 
       crz_info_hold_request = stop_go_request and not brake_release_requested
-      crz_hold_latched = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
+      crz_hold_latched = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES and \
+                         (not resume_button_requested or self.resume_crz_latched_frames > 0)
       # Stock resumes from passive hold by re-enabling ACC while the RES press
       # is active, instead of staying indefinitely in the passive-hold substate.
       crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
@@ -129,6 +146,9 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
                                                       crz_hold_passive=crz_hold_passive,
                                                       v_ego=CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
+      self.resume_button_prev = resume_button_requested
+    else:
+      self.resume_button_prev = False
 
     # send HUD alerts
     if self.frame % 50 == 0:
