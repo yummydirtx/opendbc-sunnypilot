@@ -171,13 +171,17 @@ def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, ho
 
 def create_longitudinal_messages(bus: int, accel: float, counter: int, long_active: bool,
                                  lead_visible: bool, standstill: bool, *, hold_request: bool = False,
+                                 crz_ctrl_hold_request: bool | None = None,
                                  hold_latched: bool = False, crz_hold_latched: bool = False,
                                  crz_hold_passive: bool = False,
                                  v_ego: float = 0.0) -> list[CanData]:
+  if crz_ctrl_hold_request is None:
+    crz_ctrl_hold_request = hold_request
+
   return [
     CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, v_ego,
                                           hold_latched=hold_latched), bus),
-    CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, hold_request, hold_latched,
+    CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, crz_ctrl_hold_request, hold_latched,
                                           crz_hold_latched=crz_hold_latched,
                                           crz_hold_passive=crz_hold_passive), bus),
   ]

@@ -71,7 +71,6 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       starting = CC.actuators.longControlState == LongCtrlState.starting
       resume_button_requested = CC.cruiseControl.resume
       release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or starting
-      brake_release_requested = resume_button_requested or release_hold_requested
 
       if not CC.longActive:
         self.standstill_hold_frames = 0
@@ -82,11 +81,6 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         else:
           self.standstill_hold_frames = 0
 
-        if CS.out.standstill and brake_release_requested:
-          self.resume_release_frames = RESUME_RELEASE_FRAMES
-        elif self.resume_release_frames > 0:
-          self.resume_release_frames -= 1
-
       # Stock MRCC enters its stop-go state before the standstill bit flips.
       # Mirror that near-stop transition on the synthesized CRZ frames while
       # keeping the later latch timing anchored to true standstill.
@@ -94,12 +88,20 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       # stop-go hold state. Only release that synthetic hold once the car is
       # actually starting to move or the driver overrides with gas.
       stop_go_request = CC.longActive and not release_hold_requested and (CS.out.standstill or stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED)
-      hold_request = CC.longActive and CS.out.standstill and not release_hold_requested
-      crz_hold_latched = hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
+      standstill_hold_request = CC.longActive and CS.out.standstill and not release_hold_requested
+      hold_latched = standstill_hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
+      brake_release_requested = release_hold_requested or (resume_button_requested and (not stopping or hold_latched))
+
+      if CS.out.standstill and brake_release_requested:
+        self.resume_release_frames = RESUME_RELEASE_FRAMES
+      elif self.resume_release_frames > 0:
+        self.resume_release_frames -= 1
+
+      crz_info_hold_request = stop_go_request and not brake_release_requested
+      crz_hold_latched = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES
       # Stock resumes from passive hold by re-enabling ACC while the RES press
       # is active, instead of staying indefinitely in the passive-hold substate.
-      crz_hold_passive = hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
-      hold_latched = hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
+      crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
       release_brake = self.resume_release_frames > 0
 
       accel = 0.0
@@ -120,7 +122,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         lead_visible = CC.hudControl.leadVisible
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, lead_visible, CS.out.standstill,
-                                                      hold_request=stop_go_request,
+                                                      hold_request=crz_info_hold_request,
+                                                      crz_ctrl_hold_request=stop_go_request,
                                                       hold_latched=hold_latched,
                                                       crz_hold_latched=crz_hold_latched,
                                                       crz_hold_passive=crz_hold_passive,
