@@ -75,13 +75,16 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if self.CP.openpilotLongitudinalControl:
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       starting = CC.actuators.longControlState == LongCtrlState.starting
+      # Once upstream is actively requesting positive drive torque, do not let
+      # the synthetic near-stop HOLD path clamp the car back into braking.
+      restart_requested = starting or (not stopping and CC.actuators.accel > 0.0)
       # Physical wheel RES survives radar suppression on CRZ_BTNS, while the
       # planner-driven virtual resume comes in through CC.cruiseControl.resume.
       # Treat either source as the Mazda stop-go resume request so manual RES
       # exits the synthetic hold path the same way stock does.
       resume_button_requested = CC.cruiseControl.resume or bool(CS.accel_button)
       resume_rising_edge = resume_button_requested and not self.resume_button_prev
-      release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or starting
+      release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or restart_requested
 
       if not CC.longActive:
         self.standstill_hold_frames = 0
@@ -134,7 +137,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
           accel = max(accel, 0.0)
         elif CS.out.standstill:
           accel = hold_latched_accel() if hold_latched else hold_brake_accel()
-        elif stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED:
+        elif not release_hold_requested and (stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED):
           accel = min(accel, near_stop_brake_accel(CS.out.vEgo))
 
       if self.frame % TESTER_PRESENT_STEP == 0:
