@@ -137,6 +137,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       # is active, instead of staying indefinitely in the passive-hold substate.
       crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
       release_brake = self.resume_release_frames > 0
+      crz_ctrl_resume_active = release_brake and CS.out.vEgo < self.CP.vEgoStarting and not crz_hold_latched and not crz_hold_passive
       # Keep CRZ_INFO stop bits cleared through the whole synthetic brake-release
       # window. Otherwise Mazda sees positive accel while we still advertise an
       # active stop, which shows up in the logs as a failed restart handoff.
@@ -171,6 +172,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
                                                       hold_latched=hold_latched,
                                                       crz_hold_latched=crz_hold_latched,
                                                       crz_hold_passive=crz_hold_passive,
+                                                      crz_resume_active=crz_ctrl_resume_active,
                                                       v_ego=CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
       self.resume_button_prev = resume_button_requested

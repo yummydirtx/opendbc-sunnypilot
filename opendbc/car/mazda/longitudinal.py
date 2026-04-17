@@ -170,7 +170,8 @@ def select_profile(long_active: bool, lead_visible: bool, hold_request: bool,
 
 
 def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, hold_latched: bool,
-                   crz_hold_latched: bool = False, crz_hold_passive: bool = False) -> bytes:
+                   crz_hold_latched: bool = False, crz_hold_passive: bool = False,
+                   crz_resume_active: bool = False) -> bytes:
   # Stock stop-and-go progresses through multiple CRZ_CTRL stop phases. Mirror
   # that sequence so the synthetic path keeps the same latch states as stock.
   lead_visible = lead_visible or hold_request or hold_latched or crz_hold_latched or crz_hold_passive
@@ -180,6 +181,16 @@ def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, ho
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_1", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_2", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "RADAR_HAS_LEAD", int(lead_visible))
+  # Stock resume transitions rely on more than the coarse 0x21c templates. The
+  # live radar path preserves these fields automatically, but the synthetic path
+  # has to set them explicitly to match passive hold (distance 4), active
+  # stop-go / resume (distance 3 + ACC_GAS_MAYBE2), and follow (distance 2).
+  if crz_hold_passive or crz_hold_latched:
+    raw = _patch_signal("CRZ_CTRL", raw, "RADAR_LEAD_RELATIVE_DISTANCE", 4)
+    raw = _patch_signal("CRZ_CTRL", raw, "ACC_GAS_MAYBE2", 0)
+  elif hold_request or crz_resume_active:
+    raw = _patch_signal("CRZ_CTRL", raw, "RADAR_LEAD_RELATIVE_DISTANCE", 3)
+    raw = _patch_signal("CRZ_CTRL", raw, "ACC_GAS_MAYBE2", 1)
   return raw
 
 
@@ -188,6 +199,7 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
                                  crz_ctrl_hold_request: bool | None = None,
                                  hold_latched: bool = False, crz_hold_latched: bool = False,
                                  crz_hold_passive: bool = False,
+                                 crz_resume_active: bool = False,
                                  v_ego: float = 0.0) -> list[CanData]:
   if crz_ctrl_hold_request is None:
     crz_ctrl_hold_request = hold_request
@@ -197,7 +209,8 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
                                           hold_latched=hold_latched), bus),
     CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, crz_ctrl_hold_request, hold_latched,
                                           crz_hold_latched=crz_hold_latched,
-                                          crz_hold_passive=crz_hold_passive), bus),
+                                          crz_hold_passive=crz_hold_passive,
+                                          crz_resume_active=crz_resume_active), bus),
   ]
 
 
