@@ -25,7 +25,6 @@ class CarState(CarStateBase):
     self.decel_button = 0
     self.cancel_button = 0
     self.main_button = 0
-    self.cruise_standstill_latched = False
 
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
@@ -137,18 +136,7 @@ class CarState(CarStateBase):
       # carState.cruiseState.nonAdaptive instead.
       ret.cruiseState.available = cp.vl["CRZ_CTRL"]["CRZ_AVAILABLE"] == 1
       ret.cruiseState.enabled = cp.vl["CRZ_CTRL"]["CRZ_ACTIVE"] == 1
-    pedal_cruise_standstill = cp.vl["PEDALS"]["STANDSTILL"] == 1
-    if self.CP.openpilotLongitudinalControl:
-      # The stock ACC standstill bit can clear before the chassis actually
-      # starts moving. Keep cruise standstill latched until there is real
-      # vehicle motion so RES stays asserted long enough to release HOLD.
-      if pedal_cruise_standstill or ret.standstill:
-        self.cruise_standstill_latched = True
-      elif ret.vEgo > self.CP.vEgoStarting:
-        self.cruise_standstill_latched = False
-      ret.cruiseState.standstill = self.cruise_standstill_latched
-    else:
-      ret.cruiseState.standstill = pedal_cruise_standstill
+    ret.cruiseState.standstill = cp.vl["PEDALS"]["STANDSTILL"] == 1
     ret.cruiseState.speed = cp.vl["CRZ_EVENTS"]["CRZ_SPEED"] * CV.KPH_TO_MS
     ret.cruiseState.speedCluster = ret.cruiseState.speed
 

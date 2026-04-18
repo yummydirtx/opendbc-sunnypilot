@@ -8,12 +8,6 @@
 #define MAZDA_CRZ_INFO      0x21bU
 #define MAZDA_CRZ_CTRL      0x21cU
 #define MAZDA_CRZ_BTNS      0x09dU
-#define MAZDA_RADAR_361     0x361U
-#define MAZDA_RADAR_362     0x362U
-#define MAZDA_RADAR_363     0x363U
-#define MAZDA_RADAR_364     0x364U
-#define MAZDA_RADAR_365     0x365U
-#define MAZDA_RADAR_366     0x366U
 #define MAZDA_RADAR_UDS     0x764U
 #define MAZDA_STEER_TORQUE  0x240U
 #define MAZDA_ENGINE_DATA   0x202U
@@ -167,12 +161,6 @@ static safety_config mazda_init(uint16_t param) {
     {MAZDA_LKAS_HUD, 0, 8, .check_relay = true},
     {MAZDA_CRZ_INFO, 0, 8, .check_relay = false},
     {MAZDA_CRZ_CTRL, 0, 8, .check_relay = false},
-    {MAZDA_RADAR_361, 0, 8, .check_relay = false},
-    {MAZDA_RADAR_362, 0, 8, .check_relay = false},
-    {MAZDA_RADAR_363, 0, 8, .check_relay = false},
-    {MAZDA_RADAR_364, 0, 8, .check_relay = false},
-    {MAZDA_RADAR_365, 0, 8, .check_relay = false},
-    {MAZDA_RADAR_366, 0, 8, .check_relay = false},
     {MAZDA_RADAR_UDS, 0, 8, .check_relay = false},
   };
 
