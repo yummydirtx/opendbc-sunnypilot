@@ -17,6 +17,7 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 CRZ_CTRL_LATCH_FRAMES = int(round(2.0 / DT_CTRL))
 CRZ_CTRL_PASSIVE_FRAMES = int(round(9.6 / DT_CTRL))
 CRZ_CTRL_RESUME_REACTIVATE_FRAMES = int(round(0.08 / DT_CTRL))
+CRZ_INFO_RESUME_PHASE_FRAMES = int(round(0.20 / DT_CTRL))
 HOLD_REQUEST_FRAMES = int(round(6.0 / DT_CTRL))
 RESUME_RELEASE_FRAMES = int(round(0.5 / DT_CTRL))
 
@@ -35,6 +36,9 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.standstill_hold_frames = 0
     self.resume_release_frames = 0
     self.resume_crz_latched_frames = 0
+    self.resume_phase_frames = 0
+    self.resume_ctrl_active_prev = False
+    self.virtual_resume_sent_latched = False
     self.resume_button_prev = False
 
   def update(self, CC, CC_SP, CS, now_nanos):
@@ -48,6 +52,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       CS.out.steeringTorque, self.params)
 
+    virtual_resume_sent = False
     if not self.CP.openpilotLongitudinalControl:
       if CC.cruiseControl.cancel:
         # If brake is pressed, let us wait >70ms before trying to disable crz to avoid
@@ -69,6 +74,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       self.brake_counter = 0
       if CS.out.standstill and CC.cruiseControl.resume and self.frame % 5 == 0:
         can_sends.append(mazdacan.create_button_cmd(self.packer, self.CP, CS.crz_btns_counter, Buttons.RESUME))
+        virtual_resume_sent = True
 
     self.apply_torque_last = apply_torque
 
@@ -78,11 +84,14 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       # Once upstream is actively requesting positive drive torque, do not let
       # the synthetic near-stop HOLD path clamp the car back into braking.
       restart_requested = starting or (not stopping and CC.actuators.accel > 0.0)
-      # Physical wheel RES survives radar suppression on CRZ_BTNS, while the
-      # planner-driven virtual resume comes in through CC.cruiseControl.resume.
-      # Treat either source as the Mazda stop-go resume request so manual RES
-      # exits the synthetic hold path the same way stock does.
-      resume_button_requested = CC.cruiseControl.resume or bool(CS.accel_button)
+      # Physical wheel RES survives radar suppression on CRZ_BTNS. For virtual
+      # RES, do not start the synthetic unlatch path until the first RES frame
+      # has actually been transmitted on the bus.
+      if not CC.cruiseControl.resume or not CS.out.standstill:
+        self.virtual_resume_sent_latched = False
+      elif virtual_resume_sent:
+        self.virtual_resume_sent_latched = True
+      resume_button_requested = bool(CS.accel_button) or (CC.cruiseControl.resume and self.virtual_resume_sent_latched)
       resume_rising_edge = resume_button_requested and not self.resume_button_prev
       release_hold_requested = False
       release_brake = False
@@ -90,6 +99,9 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         self.standstill_hold_frames = 0
         self.resume_release_frames = 0
         self.resume_crz_latched_frames = 0
+        self.resume_phase_frames = 0
+        self.resume_ctrl_active_prev = False
+        self.virtual_resume_sent_latched = False
       else:
         hold_latched_ready = CS.out.standstill and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
         # Treat either a virtual or physical RES request as a real HOLD unlatch
@@ -138,6 +150,15 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
       release_brake = self.resume_release_frames > 0
       crz_ctrl_resume_active = release_brake and CS.out.vEgo < self.CP.vEgoStarting and not crz_hold_latched and not crz_hold_passive
+      if crz_ctrl_resume_active:
+        if not self.resume_ctrl_active_prev:
+          self.resume_phase_frames = CRZ_INFO_RESUME_PHASE_FRAMES
+        elif self.resume_phase_frames > 0:
+          self.resume_phase_frames -= 1
+      else:
+        self.resume_phase_frames = 0
+      crz_info_resume_unlatching = crz_ctrl_resume_active and self.resume_phase_frames > 0
+      self.resume_ctrl_active_prev = crz_ctrl_resume_active
       # Keep CRZ_INFO stop bits cleared through the whole synthetic brake-release
       # window. Otherwise Mazda sees positive accel while we still advertise an
       # active stop, which shows up in the logs as a failed restart handoff.
@@ -173,6 +194,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
                                                       crz_hold_latched=crz_hold_latched,
                                                       crz_hold_passive=crz_hold_passive,
                                                       crz_resume_active=crz_ctrl_resume_active,
+                                                      crz_info_resume_unlatching=crz_info_resume_unlatching,
                                                       v_ego=CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
       self.resume_button_prev = resume_button_requested

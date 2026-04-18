@@ -143,7 +143,8 @@ def near_stop_brake_accel(v_ego: float) -> float:
 
 
 def build_crz_info(accel: float, counter: int, long_active: bool, hold_request: bool, v_ego: float,
-                   hold_latched: bool = False, acc_set_allowed: bool = True) -> bytes:
+                   hold_latched: bool = False, acc_set_allowed: bool = True,
+                   resume_unlatching: bool = False) -> bytes:
   stopping_active = hold_request and not hold_latched
   raw = _patch_signal("CRZ_INFO", CRZ_INFO_TEMPLATE, "ACCEL_CMD", accel_to_accel_cmd(accel, v_ego))
   raw = _patch_signal("CRZ_INFO", raw, "ACC_ACTIVE", int(long_active))
@@ -151,6 +152,7 @@ def build_crz_info(accel: float, counter: int, long_active: bool, hold_request: 
   raw = _patch_signal("CRZ_INFO", raw, "CRZ_ENDED", 0)
   raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE", int(stopping_active))
   raw = _patch_signal("CRZ_INFO", raw, "STOPPING_MAYBE2", int(stopping_active))
+  raw = _patch_signal("CRZ_INFO", raw, "RESUME_UNLATCHING_MAYBE", int(resume_unlatching))
   raw = _patch_signal("CRZ_INFO", raw, "CTR1", counter % 16)
   checksum_bias = ACTIVE_STOP_CHECKSUM_BIAS if stopping_active else 0
   return _update_crz_info_checksum(raw, bias=checksum_bias)
@@ -200,13 +202,15 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
                                  hold_latched: bool = False, crz_hold_latched: bool = False,
                                  crz_hold_passive: bool = False,
                                  crz_resume_active: bool = False,
+                                 crz_info_resume_unlatching: bool = False,
                                  v_ego: float = 0.0) -> list[CanData]:
   if crz_ctrl_hold_request is None:
     crz_ctrl_hold_request = hold_request
 
   return [
     CanData(CRZ_INFO_ADDR, build_crz_info(accel, counter, long_active, hold_request, v_ego,
-                                          hold_latched=hold_latched), bus),
+                                          hold_latched=hold_latched,
+                                          resume_unlatching=crz_info_resume_unlatching), bus),
     CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, crz_ctrl_hold_request, hold_latched,
                                           crz_hold_latched=crz_hold_latched,
                                           crz_hold_passive=crz_hold_passive,
