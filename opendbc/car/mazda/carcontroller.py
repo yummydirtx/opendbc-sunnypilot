@@ -31,6 +31,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.brake_counter = 0
     self.long_counter = 0
     self.standstill_hold_frames = 0
+    self.stop_intent_latched = False
     self.resume_release_frames = 0
     self.resume_crz_latched_frames = 0
     self.resume_phase_frames = 0
@@ -78,9 +79,10 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if self.CP.openpilotLongitudinalControl:
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       starting = CC.actuators.longControlState == LongCtrlState.starting
-      # Once upstream is actively requesting positive drive torque, do not let
-      # the synthetic near-stop HOLD path clamp the car back into braking.
-      restart_requested = starting or (not stopping and CC.actuators.accel > 0.0)
+      # Do not treat tiny positive low-speed PID noise as a real restart
+      # request. Only the explicit upstream starting phase should release the
+      # synthetic HOLD clamp automatically.
+      restart_requested = starting
       # Physical wheel RES survives radar suppression on CRZ_BTNS. For virtual
       # RES, do not start the synthetic unlatch path until the first RES frame
       # has actually been transmitted on the bus.
@@ -88,28 +90,38 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         self.virtual_resume_sent_latched = False
       elif virtual_resume_sent:
         self.virtual_resume_sent_latched = True
-      resume_button_requested = bool(CS.accel_button) or (CC.cruiseControl.resume and self.virtual_resume_sent_latched)
-      resume_rising_edge = resume_button_requested and not self.resume_button_prev
+      physical_resume_requested = bool(CS.accel_button)
+      virtual_resume_requested = CC.cruiseControl.resume and self.virtual_resume_sent_latched
+      effective_resume_requested = False
       release_hold_requested = False
       release_brake = False
       if not CC.longActive:
         self.standstill_hold_frames = 0
+        self.stop_intent_latched = False
         self.resume_release_frames = 0
         self.resume_crz_latched_frames = 0
         self.resume_phase_frames = 0
         self.resume_ctrl_active_prev = False
         self.virtual_resume_sent_latched = False
       else:
+        if stopping:
+          self.stop_intent_latched = True
+
         hold_latched_ready = CS.out.standstill and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
-        # Treat either a virtual or physical RES request as a real HOLD unlatch
-        # request once we're either already leaving stopping or the chassis hold
-        # latch has taken over. Keep that release alive for a short dwell so the
-        # low-speed HOLD path cannot immediately re-assert itself.
-        resume_unlatch_requested = CS.out.standstill and resume_button_requested and (not stopping or hold_latched_ready)
+        # A physical wheel RES should always be able to ask Mazda to leave
+        # HOLD. A virtual RES should only count once upstream has actually
+        # entered the starting phase; otherwise red-light PID creep can look
+        # like a false auto-resume request while the planner still intends to
+        # stay stopped.
+        physical_resume_unlatch_requested = CS.out.standstill and physical_resume_requested and (not stopping or hold_latched_ready)
+        virtual_resume_unlatch_requested = CS.out.standstill and virtual_resume_requested and restart_requested
+        resume_unlatch_requested = physical_resume_unlatch_requested or virtual_resume_unlatch_requested
+        effective_resume_requested = resume_unlatch_requested
+        resume_rising_edge = effective_resume_requested and not self.resume_button_prev
         release_brake = self.resume_release_frames > 0
         base_release_hold_requested = CC.cruiseControl.override or CS.out.gasPressed or restart_requested or release_brake
 
-        if CS.out.standstill and not base_release_hold_requested:
+        if CS.out.standstill and self.stop_intent_latched and not base_release_hold_requested:
           self.standstill_hold_frames += 1
         else:
           self.standstill_hold_frames = 0
@@ -129,22 +141,26 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         release_brake = self.resume_release_frames > 0
         release_hold_requested = base_release_hold_requested or resume_unlatch_requested or release_brake
 
-      # Stock MRCC enters its stop-go state before the standstill bit flips.
-      # Mirror that near-stop transition on the synthesized CRZ frames while
-      # keeping the later latch timing anchored to true standstill.
+        if release_hold_requested or (not CS.out.standstill and not stopping and CS.out.vEgo > NEAR_STOP_ENTRY_SPEED):
+          self.stop_intent_latched = False
+
+      # Only enter Mazda's synthetic stop-go/HOLD path when upstream has
+      # actually committed to a stop. Once that happens, keep the stop intent
+      # latched through the standstill/HOLD phases until a real restart or
+      # driver override releases it.
       # A virtual RES press should happen while Mazda still sees the passive
       # stop-go hold state. Only release that synthetic hold once the car is
       # actually starting to move or the driver overrides with gas.
-      stop_go_request = CC.longActive and not release_hold_requested and (CS.out.standstill or stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED)
-      standstill_hold_request = CC.longActive and CS.out.standstill and not release_hold_requested
+      stop_go_request = CC.longActive and self.stop_intent_latched and not release_hold_requested
+      standstill_hold_request = stop_go_request and CS.out.standstill
       hold_latched = standstill_hold_request and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
-      brake_release_requested = release_hold_requested or (resume_button_requested and (not stopping or hold_latched))
+      brake_release_requested = release_hold_requested or effective_resume_requested
 
       crz_hold_latched = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_LATCH_FRAMES and \
-                         (not resume_button_requested or self.resume_crz_latched_frames > 0)
+                         (not effective_resume_requested or self.resume_crz_latched_frames > 0)
       # Stock resumes from passive hold by re-enabling ACC while the RES press
       # is active, instead of staying indefinitely in the passive-hold substate.
-      crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not resume_button_requested
+      crz_hold_passive = standstill_hold_request and self.standstill_hold_frames >= CRZ_CTRL_PASSIVE_FRAMES and not effective_resume_requested
       release_brake = self.resume_release_frames > 0
       crz_ctrl_resume_active = release_brake and CS.out.vEgo < self.CP.vEgoStarting and not crz_hold_latched and not crz_hold_passive
       if crz_ctrl_resume_active:
@@ -168,7 +184,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
           accel = max(accel, 0.0)
         elif CS.out.standstill:
           accel = hold_latched_accel() if hold_latched else hold_brake_accel()
-        elif not release_hold_requested and (stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED):
+        elif self.stop_intent_latched and not release_hold_requested and (stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED):
           accel = min(accel, near_stop_brake_accel(CS.out.vEgo))
 
       if self.frame % TESTER_PRESENT_STEP == 0:
@@ -188,7 +204,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
                                                       crz_info_resume_unlatching=crz_info_resume_unlatching,
                                                       v_ego=CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
-      self.resume_button_prev = resume_button_requested
+      self.resume_button_prev = effective_resume_requested
     else:
       self.resume_button_prev = False
 
