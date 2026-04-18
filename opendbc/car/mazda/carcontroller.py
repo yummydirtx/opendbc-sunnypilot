@@ -78,9 +78,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     if self.CP.openpilotLongitudinalControl:
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       starting = CC.actuators.longControlState == LongCtrlState.starting
-      # Once upstream is actively requesting positive drive torque, do not let
-      # the synthetic near-stop HOLD path clamp the car back into braking.
-      restart_requested = starting or (not stopping and CC.actuators.accel > 0.0)
+      # Near-stop PID output can cross above zero at a red light before there is
+      # any real restart request. Releasing HOLD on that sign flip causes
+      # synthetic creep, so only treat an explicit starting phase as an
+      # openpilot-driven restart request here.
+      restart_requested = starting
       # Physical wheel RES survives radar suppression on CRZ_BTNS. For virtual
       # RES, do not start the synthetic unlatch path until the first RES frame
       # has actually been transmitted on the bus.
