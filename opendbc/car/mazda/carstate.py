@@ -126,9 +126,10 @@ class CarState(CarStateBase):
 
     # In alpha-long mode the radar-owned CRZ_CTRL frame is intentionally
     # suppressed, so do not subscribe to it here or card will mark CAN invalid
-    # once the stock frame times out after takeover.
+    # once the stock frame times out after takeover. PEDALS.ACC_OFF is still a
+    # valid stock "main on" signal despite the misleading DBC name.
     if self.CP.openpilotLongitudinalControl:
-      ret.cruiseState.available = True
+      ret.cruiseState.available = cp.vl["PEDALS"]["ACC_OFF"] == 1
       ret.cruiseState.enabled = cp.vl["PEDALS"]["ACC_ACTIVE"] == 1
     else:
       # TODO: the signal used for available seems to be the adaptive cruise signal,
