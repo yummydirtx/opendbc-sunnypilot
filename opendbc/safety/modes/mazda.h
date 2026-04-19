@@ -22,8 +22,6 @@ enum {
 };
 
 static bool mazda_longitudinal = false;
-static bool mazda_resume_prev = false;
-static bool mazda_set_minus_prev = false;
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
@@ -51,21 +49,9 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
 
     if (msg->addr == MAZDA_CRZ_BTNS && mazda_longitudinal) {
       bool cancel = GET_BIT(msg, 0U);
-      bool resume = GET_BIT(msg, 2U);
-      bool set_minus = GET_BIT(msg, 5U);
-
-      if (resume && !mazda_resume_prev) {
-        controls_allowed = true;
-      }
-      if (!set_minus && mazda_set_minus_prev) {
-        controls_allowed = true;
-      }
       if (cancel) {
         controls_allowed = false;
       }
-
-      mazda_resume_prev = resume;
-      mazda_set_minus_prev = set_minus;
       acc_main_on = true;
     }
 
@@ -74,6 +60,13 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
     }
 
     if (msg->addr == MAZDA_PEDALS) {
+      if (mazda_longitudinal) {
+        // Radar suppression removes the stock CRZ_CTRL frame, but the pedal
+        // message still reflects the ACC active state. Use it as the PCM cruise
+        // source so Mazda-long matches pcmCruise semantics in selfdrive.
+        bool cruise_engaged = GET_BIT(msg, 3U);
+        pcm_cruise_check(cruise_engaged);
+      }
       brake_pressed = (msg->data[0] & 0x10U);
     }
   }
@@ -179,8 +172,6 @@ static safety_config mazda_init(uint16_t param) {
   };
 
   mazda_longitudinal = GET_FLAG(param, MAZDA_PARAM_LONGITUDINAL);
-  mazda_resume_prev = false;
-  mazda_set_minus_prev = false;
   acc_main_on = mazda_longitudinal;
 
   return mazda_longitudinal ? BUILD_SAFETY_CFG(mazda_long_rx_checks, MAZDA_LONG_TX_MSGS) :

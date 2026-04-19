@@ -21,7 +21,10 @@ class CarInterface(CarInterfaceBase):
     ret.brand = "mazda"
     ret.alphaLongitudinalAvailable = candidate == CAR.MAZDA_CX5_2022
     ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
-    ret.pcmCruise = not ret.openpilotLongitudinalControl
+    # Mazda-long still engages on the stock ACC-active transition even though
+    # we suppress the radar-owned CRZ_CTRL path and synthesize replacement
+    # longitudinal messages.
+    ret.pcmCruise = True
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.mazda,
                                            MAZDA_LONG_SAFETY_PARAM if ret.openpilotLongitudinalControl else None)]
     ret.radarUnavailable = ret.openpilotLongitudinalControl or Bus.radar not in DBC[candidate]
