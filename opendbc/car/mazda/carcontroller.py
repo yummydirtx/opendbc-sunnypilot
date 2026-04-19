@@ -109,12 +109,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
 
         hold_latched_ready = CS.out.standstill and self.standstill_hold_frames > HOLD_REQUEST_FRAMES
         # A physical wheel RES should always be able to ask Mazda to leave
-        # HOLD. A virtual RES should only count once upstream has actually
-        # entered the starting phase; otherwise red-light PID creep can look
-        # like a false auto-resume request while the planner still intends to
-        # stay stopped.
+        # HOLD. For virtual RES, require that we have both actually sent a RES
+        # frame and reached the latched-hold phase so a transient shouldStop
+        # flicker cannot prematurely release the synthetic hold.
         physical_resume_unlatch_requested = CS.out.standstill and physical_resume_requested and (not stopping or hold_latched_ready)
-        virtual_resume_unlatch_requested = CS.out.standstill and virtual_resume_requested and restart_requested
+        virtual_resume_unlatch_requested = CS.out.standstill and virtual_resume_requested and hold_latched_ready
         resume_unlatch_requested = physical_resume_unlatch_requested or virtual_resume_unlatch_requested
         effective_resume_requested = resume_unlatch_requested
         resume_rising_edge = effective_resume_requested and not self.resume_button_prev
