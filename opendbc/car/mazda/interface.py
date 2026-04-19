@@ -42,10 +42,10 @@ class CarInterface(CarInterfaceBase):
 
     if ret.openpilotLongitudinalControl:
       ret.startingState = True
-      ret.startAccel = 1.0
-      ret.vEgoStarting = 0.1
-      ret.vEgoStopping = 0.25
-      ret.longitudinalActuatorDelay = 0.3
+      ret.startAccel = 1.2
+      ret.vEgoStarting = 0.15
+      ret.vEgoStopping = 0.5
+      ret.longitudinalActuatorDelay = 0.36
       ret.longitudinalTuning.kpBP = [0., 5., 20.]
       ret.longitudinalTuning.kpV = [1.2, 1.0, 0.8]
       ret.longitudinalTuning.kiBP = [0., 5., 20.]
