@@ -69,3 +69,11 @@ class CarInterface(CarInterfaceBase):
   def init(CP, CP_SP, can_recv, can_send):
     if CP.openpilotLongitudinalControl:
       enter_radar_programming_session(can_recv, can_send)
+
+  @staticmethod
+  def deinit(CP, can_recv, can_send):
+    if CP.openpilotLongitudinalControl:
+      # Mazda's radar faults if we explicitly request the default/active session
+      # on teardown. Exiting cleanly is just stopping tester present and letting
+      # the radar time out back to stock behavior on its own.
+      return

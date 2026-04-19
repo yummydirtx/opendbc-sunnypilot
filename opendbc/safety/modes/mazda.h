@@ -52,7 +52,6 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
       if (cancel) {
         controls_allowed = false;
       }
-      acc_main_on = true;
     }
 
     if (msg->addr == MAZDA_ENGINE_DATA) {
@@ -60,14 +59,24 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
     }
 
     if (msg->addr == MAZDA_PEDALS) {
+      bool brake = (msg->data[0] & 0x10U);
       if (mazda_longitudinal) {
-        // Radar suppression removes the stock CRZ_CTRL frame, but the pedal
-        // message still reflects the ACC active state. Use it as the PCM cruise
-        // source so Mazda-long matches pcmCruise semantics in selfdrive.
+        // Radar suppression removes the stock CRZ_CTRL frame, so derive Mazda's
+        // "main on" state from PEDALS instead. ACC_OFF means MRCC is armed but
+        // not actively controlling, and ACC_ACTIVE means stock ACC is engaged.
         bool cruise_engaged = GET_BIT(msg, 3U);
-        pcm_cruise_check(cruise_engaged);
+        bool acc_armed = GET_BIT(msg, 2U) || cruise_engaged;
+        acc_main_on = acc_armed;
+
+        // Only feed PEDALS into pcm_cruise_check when the ACC state is actually
+        // meaningful. Brake-only samples can arrive with both ACC bits low while
+        // the driver is holding the pedal; treating those as a stock ACC-off edge
+        // drops controls before the normal brake-edge logic runs.
+        if (acc_armed || cruise_engaged_prev || (!brake && !brake_pressed_prev)) {
+          pcm_cruise_check(cruise_engaged);
+        }
       }
-      brake_pressed = (msg->data[0] & 0x10U);
+      brake_pressed = brake;
     }
   }
 }
@@ -172,7 +181,7 @@ static safety_config mazda_init(uint16_t param) {
   };
 
   mazda_longitudinal = GET_FLAG(param, MAZDA_PARAM_LONGITUDINAL);
-  acc_main_on = mazda_longitudinal;
+  acc_main_on = false;
 
   return mazda_longitudinal ? BUILD_SAFETY_CFG(mazda_long_rx_checks, MAZDA_LONG_TX_MSGS) :
                               BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
