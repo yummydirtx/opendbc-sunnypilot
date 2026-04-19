@@ -126,11 +126,16 @@ class CarState(CarStateBase):
 
     # In alpha-long mode the radar-owned CRZ_CTRL frame is intentionally
     # suppressed, so do not subscribe to it here or card will mark CAN invalid
-    # once the stock frame times out after takeover. PEDALS.ACC_OFF is still a
-    # valid stock "main on" signal despite the misleading DBC name.
+    # once the stock frame times out after takeover. On Mazda, PEDALS.ACC_OFF
+    # is asserted while MRCC is armed but not actively controlling, and
+    # PEDALS.ACC_ACTIVE is asserted once stock ACC takes over. Treat either
+    # state as cruise available so MADS does not interpret a stock ACC engage
+    # as the MRCC main switch turning off.
     if self.CP.openpilotLongitudinalControl:
-      ret.cruiseState.available = cp.vl["PEDALS"]["ACC_OFF"] == 1
-      ret.cruiseState.enabled = cp.vl["PEDALS"]["ACC_ACTIVE"] == 1
+      acc_armed = cp.vl["PEDALS"]["ACC_OFF"] == 1
+      acc_active = cp.vl["PEDALS"]["ACC_ACTIVE"] == 1
+      ret.cruiseState.available = acc_armed or acc_active
+      ret.cruiseState.enabled = acc_active
     else:
       # TODO: the signal used for available seems to be the adaptive cruise signal,
       # instead of the main on. It should be used for
