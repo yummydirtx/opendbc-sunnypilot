@@ -2,7 +2,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, TESTER_PRESENT_STEP, \
+from opendbc.car.mazda.longitudinal import LONG_COMMAND_STEP, MazdaLongitudinalProfile, NEAR_STOP_ENTRY_SPEED, RADAR_BUS, TESTER_PRESENT_STEP, \
                                            create_longitudinal_messages, create_radar_tester_present, \
                                            hold_brake_accel, hold_latched_accel, near_stop_brake_accel
 from opendbc.car.mazda import mazdacan
@@ -19,6 +19,10 @@ CRZ_CTRL_RESUME_REACTIVATE_FRAMES = int(round(0.08 / DT_CTRL))
 CRZ_INFO_RESUME_PHASE_FRAMES = int(round(0.20 / DT_CTRL))
 HOLD_REQUEST_FRAMES = int(round(6.0 / DT_CTRL))
 RESUME_RELEASE_FRAMES = int(round(0.5 / DT_CTRL))
+MANUAL_OVERRIDE_BLEND_FRAMES = int(round(0.30 / DT_CTRL))
+MANUAL_OVERRIDE_CRUISE_ACCEL = 0.10
+MANUAL_OVERRIDE_BRAKE_STRONG_ACCEL = -0.50
+MANUAL_OVERRIDE_BRAKE_ACCEL = -0.10
 
 
 class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterface):
@@ -38,6 +42,10 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.resume_ctrl_active_prev = False
     self.virtual_resume_sent_latched = False
     self.resume_button_prev = False
+    self.manual_override_prev = False
+    self.manual_override_blend_frames = 0
+    self.manual_override_start_accel = 0.0
+    self.longitudinal_accel_last = 0.0
 
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
@@ -186,12 +194,59 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         elif self.stop_intent_latched and not release_hold_requested and (stopping or CS.out.vEgo < NEAR_STOP_ENTRY_SPEED):
           accel = min(accel, near_stop_brake_accel(CS.out.vEgo))
 
+      # Stock Mazda ACC stays logically engaged when the driver adds throttle.
+      # Keep CRZ_INFO/CRZ_CTRL in an ACC-active state through that handoff and
+      # blend the last planner accel toward neutral instead of dropping from one
+      # stale active frame straight to zero/inactive on the next cycle.
+      manual_override = CS.out.cruiseState.enabled and CS.out.gasPressed and not CS.out.standstill and not stop_go_request
+      manual_override_rising = manual_override and not self.manual_override_prev
+      if manual_override_rising:
+        seed_accel = accel if CC.longActive else self.longitudinal_accel_last
+        self.manual_override_start_accel = seed_accel
+        self.manual_override_blend_frames = MANUAL_OVERRIDE_BLEND_FRAMES
+      elif not manual_override:
+        self.manual_override_blend_frames = 0
+        self.manual_override_start_accel = 0.0
+
+      if manual_override:
+        blend_ratio = (self.manual_override_blend_frames / MANUAL_OVERRIDE_BLEND_FRAMES) if MANUAL_OVERRIDE_BLEND_FRAMES > 0 else 0.0
+        accel = self.manual_override_start_accel * blend_ratio
+        stop_go_request = False
+        standstill_hold_request = False
+        hold_latched = False
+        brake_release_requested = False
+        crz_hold_latched = False
+        crz_hold_passive = False
+        crz_ctrl_resume_active = False
+        crz_info_resume_unlatching = False
+        crz_info_hold_request = False
+        if self.manual_override_blend_frames > 0:
+          self.manual_override_blend_frames -= 1
+
       if self.frame % TESTER_PRESENT_STEP == 0:
         can_sends.append(create_radar_tester_present(RADAR_BUS))
 
       if self.frame % LONG_COMMAND_STEP == 0:
-        long_active = CC.longActive
+        long_active = CC.longActive or manual_override
         lead_visible = CC.hudControl.leadVisible
+        crz_ctrl_profile_override = None
+        crz_ctrl_acc_active_2_override = None
+        crz_ctrl_radar_has_lead_override = None
+        if manual_override:
+          # Stock Mazda keeps ACC logically engaged during throttle override, but
+          # it shifts into softer CRZ_CTRL substates than the normal alpha-long
+          # follow/cruise templates. Reuse the closest stock templates and force
+          # ACC_ACTIVE_2 low so the handoff matches the stock logs more closely.
+          if accel >= MANUAL_OVERRIDE_CRUISE_ACCEL:
+            crz_ctrl_profile_override = MazdaLongitudinalProfile.ENGAGED_CRUISE
+          elif accel <= MANUAL_OVERRIDE_BRAKE_STRONG_ACCEL:
+            crz_ctrl_profile_override = MazdaLongitudinalProfile.STOP_GO_HOLD_LATCHED
+          elif accel <= MANUAL_OVERRIDE_BRAKE_ACCEL:
+            crz_ctrl_profile_override = MazdaLongitudinalProfile.STOP_GO_HOLD
+          else:
+            crz_ctrl_profile_override = MazdaLongitudinalProfile.ENGAGED_FOLLOW
+          crz_ctrl_acc_active_2_override = False
+          crz_ctrl_radar_has_lead_override = True
         can_sends.extend(create_longitudinal_messages(RADAR_BUS, accel, self.long_counter,
                                                       long_active, lead_visible, CS.out.standstill,
                                                       hold_request=crz_info_hold_request,
@@ -201,10 +256,19 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
                                                       crz_hold_passive=crz_hold_passive,
                                                       crz_resume_active=crz_ctrl_resume_active,
                                                       crz_info_resume_unlatching=crz_info_resume_unlatching,
+                                                      crz_ctrl_profile_override=crz_ctrl_profile_override,
+                                                      crz_ctrl_acc_active_2_override=crz_ctrl_acc_active_2_override,
+                                                      crz_ctrl_radar_has_lead_override=crz_ctrl_radar_has_lead_override,
                                                       v_ego=CS.out.vEgo))
         self.long_counter = (self.long_counter + 1) % 16
+        self.longitudinal_accel_last = accel if long_active else 0.0
+      self.manual_override_prev = manual_override
       self.resume_button_prev = effective_resume_requested
     else:
+      self.manual_override_prev = False
+      self.manual_override_blend_frames = 0
+      self.manual_override_start_accel = 0.0
+      self.longitudinal_accel_last = 0.0
       self.resume_button_prev = False
 
     # send HUD alerts

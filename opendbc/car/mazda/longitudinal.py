@@ -159,16 +159,24 @@ def select_profile(long_active: bool, lead_visible: bool, hold_request: bool,
 
 def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, hold_latched: bool,
                    crz_hold_latched: bool = False, crz_hold_passive: bool = False,
-                   crz_resume_active: bool = False) -> bytes:
+                   crz_resume_active: bool = False,
+                   profile_override: MazdaLongitudinalProfile | None = None,
+                   acc_active_2_override: bool | None = None,
+                   radar_has_lead_override: bool | None = None,
+                   radar_lead_distance_override: int | None = None,
+                   acc_gas_override: int | None = None) -> bytes:
   # Stock stop-and-go progresses through multiple CRZ_CTRL stop phases. Mirror
   # that sequence so the synthetic path keeps the same latch states as stock.
   lead_visible = lead_visible or hold_request or hold_latched or crz_hold_latched or crz_hold_passive
-  raw = CRZ_CTRL_TEMPLATES[select_profile(long_active, lead_visible, hold_request, crz_hold_latched)]
+  profile = profile_override if profile_override is not None else select_profile(long_active, lead_visible, hold_request, crz_hold_latched)
+  raw = CRZ_CTRL_TEMPLATES[profile]
   raw = _patch_signal("CRZ_CTRL", raw, "CRZ_ACTIVE", int(long_active))
-  raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", int(long_active and not crz_hold_passive))
+  acc_active_2 = int(long_active and not crz_hold_passive) if acc_active_2_override is None else int(acc_active_2_override)
+  raw = _patch_signal("CRZ_CTRL", raw, "ACC_ACTIVE_2", acc_active_2)
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_1", 0)
   raw = _patch_signal("CRZ_CTRL", raw, "DISABLE_TIMER_2", 0)
-  raw = _patch_signal("CRZ_CTRL", raw, "RADAR_HAS_LEAD", int(lead_visible))
+  radar_has_lead = int(lead_visible) if radar_has_lead_override is None else int(radar_has_lead_override)
+  raw = _patch_signal("CRZ_CTRL", raw, "RADAR_HAS_LEAD", radar_has_lead)
   # Stock resume transitions rely on more than the coarse 0x21c templates. The
   # live radar path preserves these fields automatically, but the synthetic path
   # has to set them explicitly to match passive hold (distance 4), active
@@ -179,6 +187,10 @@ def build_crz_ctrl(long_active: bool, lead_visible: bool, hold_request: bool, ho
   elif hold_request or crz_resume_active:
     raw = _patch_signal("CRZ_CTRL", raw, "RADAR_LEAD_RELATIVE_DISTANCE", 3)
     raw = _patch_signal("CRZ_CTRL", raw, "ACC_GAS_MAYBE2", 1)
+  if radar_lead_distance_override is not None:
+    raw = _patch_signal("CRZ_CTRL", raw, "RADAR_LEAD_RELATIVE_DISTANCE", radar_lead_distance_override)
+  if acc_gas_override is not None:
+    raw = _patch_signal("CRZ_CTRL", raw, "ACC_GAS_MAYBE2", acc_gas_override)
   return raw
 
 
@@ -189,6 +201,11 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
                                  crz_hold_passive: bool = False,
                                  crz_resume_active: bool = False,
                                  crz_info_resume_unlatching: bool = False,
+                                 crz_ctrl_profile_override: MazdaLongitudinalProfile | None = None,
+                                 crz_ctrl_acc_active_2_override: bool | None = None,
+                                 crz_ctrl_radar_has_lead_override: bool | None = None,
+                                 crz_ctrl_radar_distance_override: int | None = None,
+                                 crz_ctrl_acc_gas_override: int | None = None,
                                  v_ego: float = 0.0) -> list[CanData]:
   if crz_ctrl_hold_request is None:
     crz_ctrl_hold_request = hold_request
@@ -200,7 +217,12 @@ def create_longitudinal_messages(bus: int, accel: float, counter: int, long_acti
     CanData(CRZ_CTRL_ADDR, build_crz_ctrl(long_active, lead_visible, crz_ctrl_hold_request, hold_latched,
                                           crz_hold_latched=crz_hold_latched,
                                           crz_hold_passive=crz_hold_passive,
-                                          crz_resume_active=crz_resume_active), bus),
+                                          crz_resume_active=crz_resume_active,
+                                          profile_override=crz_ctrl_profile_override,
+                                          acc_active_2_override=crz_ctrl_acc_active_2_override,
+                                          radar_has_lead_override=crz_ctrl_radar_has_lead_override,
+                                          radar_lead_distance_override=crz_ctrl_radar_distance_override,
+                                          acc_gas_override=crz_ctrl_acc_gas_override), bus),
   ]
 
 
